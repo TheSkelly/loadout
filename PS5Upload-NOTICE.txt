@@ -1,0 +1,13 @@
+Loadout sends games to the PS5 with PS5Upload.
+
+ps5upload-engine.exe in this folder is the PS5Upload engine, version 6.1.0,
+taken unchanged from the official PS5Upload release. It is a separate program
+that Loadout starts in the background and talks to over a local connection.
+
+PS5Upload is made by PhantomPtr and contributors and is licensed under the
+GNU General Public License, version 3. The full license is in
+PS5Upload-LICENSE.txt. Its complete source code is at:
+
+  https://github.com/phantomptr/ps5upload  (tag v6.1.0)
+
+You are free to use, share and change PS5Upload under the terms of that license.

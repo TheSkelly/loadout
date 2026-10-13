@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loadout</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="Sections">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path class="tagshape" d="M5 9.5 11 4h16a2 2 0 0 1 2 2v20a2 2 0 0 1-2 2H11l-6-5.5z"/><circle cx="11" cy="16" r="2.4" class="hole"/></svg>
+      <div><b>Loadout</b><span id="ver"></span></div>
+    </div>
+    <div class="navgroup">On this PC</div>
+    <button class="navbtn" data-view="library" aria-current="page">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg>
+      <span>Library</span><em id="nav-library"></em></button>
+    <button class="navbtn" data-view="rename">
+      <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/></svg>
+      <span>Rename</span><em id="nav-rename"></em></button>
+    <button class="navbtn" data-view="build">
+      <svg viewBox="0 0 24 24"><path d="M12 3 3 7.5 12 12l9-4.5z"/><path d="M3 12l9 4.5 9-4.5"/><path d="M3 16.5 12 21l9-4.5"/></svg>
+      <span>Build &amp; send</span><em id="nav-build"></em></button>
+    <div class="navgroup">On the PS5</div>
+    <button class="navbtn" data-view="ps5">
+      <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="11" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+      <span>Games</span><em id="nav-ps5"></em></button>
+    <button class="navbtn" data-view="saves">
+      <svg viewBox="0 0 24 24"><path d="M5 3h11l4 4v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M8 3v5h7V3M8 21v-7h8v7"/></svg>
+      <span>Saves</span><em id="nav-saves"></em></button>
+    <button class="navbtn" data-view="emu">
+      <svg viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="10" rx="4"/><path d="M8 11v4M6 13h4M15.5 12.5h.01M18 14.5h.01"/></svg>
+      <span>Emulators</span></button>
+    <button class="navbtn" data-view="payloads">
+      <svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 19h16"/></svg>
+      <span>Payloads</span></button>
+    <button class="navbtn" data-view="profiles">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>
+      <span>Profiles</span></button>
+    <button class="navbtn" data-view="home">
+      <svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7"/><path d="M6 10v9h12v-9"/></svg>
+      <span>Home screen</span></button>
+    <button class="navbtn" data-view="files">
+      <svg viewBox="0 0 24 24"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></svg>
+      <span>Files</span></button>
+    <div class="navspace"></div>
+    <button class="navbtn" data-view="settings">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>
+      <span>Settings</span></button>
+    <div class="rail-foot" id="railfoot"></div>
+  </nav>
+
+  <main class="main">
+    <header class="folderbar">
+      <button class="folder" id="pickFolder" title="Change games folder">
+        <svg viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg>
+        <span id="folderPath">Choose your games folder</span>
+      </button>
+      <button class="btn ghost" id="rescan"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>Rescan</button>
+      <div class="statcol"><div class="stats" id="stats"></div><div class="ps5row" id="ps5row"></div></div>
+    </header>
+
+    <!-- LIBRARY -->
+    <section class="view" id="view-library">
+      <div class="toolbar">
+        <label class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+          <input id="q" type="search" placeholder="Search by name or title ID" autocomplete="off"></label>
+        <div class="filters" id="filters" role="group" aria-label="Filter"></div>
+        <div class="seg" role="group" aria-label="Layout">
+          <button data-layout="grid" title="Covers"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg></button>
+          <button data-layout="list" title="List"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+        </div>
+      </div>
+      <div class="scroll" id="libScroll"><section class="spot" id="spot" hidden></section><div id="grid" class="grid"></div></div>
+    </section>
+
+    <!-- RENAME -->
+    <section class="view" id="view-rename" hidden>
+      <div class="panel namebar">
+        <div class="namesum">
+          <span class="nlabel">New names</span>
+          <span class="nex" id="nameSum"></span>
+          <button class="btn ghost sm" id="nameEditBtn" aria-expanded="false">Change</button>
+        </div>
+        <div class="nameedit" id="nameEdit" hidden>
+          <div class="ncol">
+            <h4>Game folders</h4>
+            <div class="plist" id="gamePresets"></div>
+            <div class="custom" id="gameCustom" hidden>
+              <input id="pattern" spellcheck="false" aria-label="Your own game name format">
+              <div class="tokens" id="tokens"></div>
+              <p class="example" id="example"></p>
+            </div>
+          </div>
+          <div class="ncol">
+            <h4>DLC folders</h4>
+            <div class="plist" id="dlcPresetList"></div>
+            <div class="custom" id="dlcCustom" hidden>
+              <input id="dlcPattern" spellcheck="false" aria-label="Your own DLC name format">
+              <div class="tokens" id="dlcTokens"></div>
+              <p class="example" id="dlcExample"></p>
+            </div>
+          </div>
+        </div>
+        <div class="toggles">
+          <label class="switch" title="Swaps &amp; for &quot;and&quot;, removes accents and symbols the PS5 can trip over"><input type="checkbox" id="safe"><span></span>Simple characters only</label>
+          <label class="switch" title="If a game's files sit loose in its folder, put them in their own subfolder (named like PPSA12345-app) the way the PS5 expects"><input type="checkbox" id="wrap"><span></span>Tidy loose game files</label>
+          <label class="switch" title="Moves DLC into a DLC folder inside the game it belongs to"><input type="checkbox" id="movedlc"><span></span>Put DLC with its game</label>
+        </div>
+      </div>
+      <div class="listhead">
+        <label class="check"><input type="checkbox" id="renAll"><span></span></label>
+        <span>Current name</span><span></span><span>New name</span><span>Status</span>
+      </div>
+      <div class="scroll" id="renList"></div>
+      <footer class="actionbar">
+        <span id="renSummary"></span>
+        <button class="btn ghost" id="undo">Undo last rename</button>
+        <button class="btn primary" id="doRename">Rename selected</button>
+      </footer>
+    </section>
+
+    <!-- BUILD -->
+    <section class="view" id="view-build" hidden>
+      <div class="panel outrow">
+        <label>Save images to</label>
+        <button class="folder small" id="pickOut"><svg viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg><span id="outPath"></span></button>
+        <button class="btn ghost" id="openOut">Open</button>
+        <span class="free" id="freeOut"></span>
+        <label class="switch right"><input type="checkbox" id="overwrite"><span></span>Rebuild images that already exist</label>
+        <label class="switch full"><input type="checkbox" id="removeAfter"><span></span>Move each game folder to the Recycle Bin after its image is built
+          <small>Only after every file in the image is checked against the folder</small></label>
+        <label class="switch full" id="nukeBigRow"><input type="checkbox" id="nukeBig"><span></span>Delete the folder for good instead of using the Recycle Bin
+          <small>Nothing goes to the Recycle Bin and Windows never stops to ask, so builds keep going while you're away. Still only after the image passes the check. The folder can't be brought back</small></label>
+      </div>
+      <div class="pcdrives" id="pcDrives"></div>
+      <p class="hint">Each game becomes one ready-to-mount .exfat image with the game files at its root. Names follow your Rename pattern and the volume label is the title ID. Nothing needs to be installed.</p>
+      <div class="listhead build">
+        <label class="check"><input type="checkbox" id="bldAll"><span></span></label>
+        <span>Game</span><span>Size</span><span>Image file</span>
+        <label class="sendhead" title="Send these games to the PS5 when they're built"><input type="checkbox" id="bldSendAll"><span></span>PS5</label>
+        <span>Status</span>
+      </div>
+      <div class="scroll" id="bldList"></div>
+      <footer class="actionbar">
+        <span id="bldSummary"></span>
+        <button class="btn ghost" id="bldShowDone" hidden></button>
+        <button class="btn ghost" id="bldMissing">Select games without an image</button>
+        <label class="destpick" id="bldDestWrap" title="Which PS5 drive the games go to">Send to <select id="bldDest"></select></label>
+        <button class="btn ghost" id="doSend">Send selected to PS5</button>
+        <button class="btn primary" id="doBuild">Build selected</button>
+      </footer>
+    </section>
+
+    <!-- PAYLOADS -->
+    <section class="view" id="view-profiles" hidden>
+      <div class="scroll">
+        <div class="settings wide">
+          <div class="set">
+            <h3>PS5 user profiles</h3>
+            <p>Change the name and picture of the users on your PS5. Loadout does this through PS5Upload's helper, which it loads on the PS5 when needed. The PS5 may need a restart, or the user signed out and back in, before a change shows everywhere.</p>
+            <div class="addrow"><button class="btn primary" id="profScan">Get the users from the PS5</button></div>
+            <div id="profStatus" class="result resultline"></div>
+          </div>
+          <div id="profList" class="proflist"></div>
+        </div>
+      </div>
+    </section>
+    <section class="view" id="view-home" hidden>
+      <div class="scroll">
+        <div class="settings wide">
+          <div class="set">
+            <h3>PS5 home screen</h3>
+            <p>Hide tiles you don't want on the PS5's home screen, and bring them back later. Loadout reads the PS5's home screen list, keeps a backup copy on this PC, and flips only the "visible" switch for the tiles you pick.</p>
+            <p><b>This part is new and experimental.</b> After hiding or showing a tile, restart the PS5 (a full restart, not rest mode) for it to take effect. If a tile comes back by itself, the PS5 has overruled the change; tell us which tile.</p>
+            <div class="addrow"><button class="btn primary" id="homeScan">Read the home screen from the PS5</button><button class="btn ghost" id="homeUndo" hidden title="Sends the copy taken before Loadout's last change back to the PS5">Undo Loadout's last change</button><button class="btn ghost" id="homeCopy" hidden>Copy details</button><button class="btn ghost" id="homeOpen" hidden>Open backup folder</button></div>
+            <div id="homeStatus" class="result resultline"></div>
+          </div>
+          <div id="homeList"></div>
+        </div>
+      </div>
+    </section>
+    <section class="view" id="view-payloads" hidden>
+      <div class="scroll">
+        <div class="settings wide">
+          <div class="set" id="autoset">
+            <h3>Payloads on the PS5</h3>
+            <p>The payloads your PS5 loads after a jailbreak, with each one's version and whether a newer one is out. Loadout reads this from PS5 Payload Manager's folder, or from an autoloader folder if you use one of those.</p>
+            <div class="addrow"><button class="btn ghost" id="autoScan">Check the PS5</button><span id="autoStatus" class="result"></span></div>
+            <div id="autoList"></div>
+          </div>
+          <div class="set" id="payset">
+            <h3>Send a payload now</h3>
+            <p>Send a payload file (.elf) from this PC straight to the PS5, like a payload sender app. Jailbreak the PS5 first so its ELF loader is listening (port 9021 with etaHEN and most setups).</p>
+            <div class="paylist" id="paylist"></div>
+            <div class="addrow">
+              <button class="btn ghost" id="payAdd">Add a payload file</button>
+              <button class="btn ghost" data-payget="shsrv" title="Free-space shell from ps5-payload-dev on GitHub">Get shsrv</button>
+              <button class="btn ghost" data-payget="ftpsrv" title="FTP server from ps5-payload-dev on GitHub">Get ftpsrv</button>
+              <label class="inline">ELF loader port<input id="payport" inputmode="numeric" class="port"></label>
+            </div>
+            <label class="switch"><input type="checkbox" id="autoShell"><span></span>Load shsrv by itself when free space is missing <small>after a jailbreak, Loadout sends shsrv once the PS5's FTP is up, so the drive sizes show without you doing anything</small></label>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- EMULATORS -->
+    <section class="view" id="view-emu" hidden>
+      <div class="toolbar" id="emuBar"></div>
+      <div class="scroll" id="emuBody"></div>
+    </section>
+
+    <!-- PS5 FILES -->
+    <section class="view" id="view-files" hidden>
+      <div class="toolbar">
+        <div class="filters" id="fxRoots" role="group" aria-label="Game folder"></div>
+        <span class="grow"></span>
+        <button class="btn ghost" id="fxMkdir">New folder</button>
+        <button class="btn primary" id="fxZip" hidden>Install from a ZIP</button>
+        <button class="btn ghost" id="fxUploadDir">Copy a folder here</button>
+        <button class="btn ghost" id="fxUpload">Copy a file here</button>
+        <button class="btn ghost" id="fxRefresh"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>Refresh</button>
+      </div>
+      <div class="fxhelp" id="fxHelp" hidden></div>
+      <div class="fxpath" id="fxPath"></div>
+      <div class="scroll" id="fxList"></div>
+    </section>
+
+    <!-- SAVES -->
+    <section class="view" id="view-saves" hidden>
+      <div class="toolbar">
+        <span class="ps5stat" id="svStatus"></span>
+        <span class="grow"></span>
+        <button class="btn ghost" id="svOpen">Open backup folder</button>
+        <button class="btn ghost" id="svRescan"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>Rescan saves</button>
+      </div>
+      <div class="scroll" id="svList"></div>
+      <footer class="actionbar">
+        <span id="svSummary"></span>
+        <button class="btn primary" id="svAll">Back up every save</button>
+      </footer>
+    </section>
+
+    <!-- ON PS5 -->
+    <section class="view" id="view-ps5" hidden>
+      <div class="toolbar">
+        <div class="filters" id="ps5Filter" role="group" aria-label="Drive"></div>
+        <span class="ps5stat" id="ps5Status"></span>
+        <button class="btn ghost" id="ps5Rescan"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>Rescan PS5</button>
+      </div>
+      <div class="listhead ps5">
+        <label class="check"><input type="checkbox" id="ps5All"><span></span></label>
+        <span>Game</span><span>Drive</span><span>Type</span><span>Size</span><span></span>
+      </div>
+      <div class="scroll" id="ps5List"></div>
+      <footer class="actionbar">
+        <span id="ps5Summary"></span>
+        <button class="btn ghost" id="ps5MoveSel">Move selected to another drive</button>
+        <button class="btn danger solid" id="ps5DelSel">Delete selected from PS5</button>
+      </footer>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="view" id="view-settings" hidden>
+      <div class="setwrap">
+        <nav class="setnav" id="setnav" aria-label="Settings sections">
+          <button data-settab="ps5" aria-current="true">PS5 connection</button>
+          <button data-settab="send">Sending games</button>
+          <button data-settab="phone">Phone remote &amp; alerts</button>
+          <button data-settab="library">Library</button>
+          <button data-settab="app">App</button>
+        </nav>
+        <div class="scroll">
+        <div class="settings">
+          <div class="set" data-tab="ps5" id="ps5set">
+            <h3>Your PS5</h3>
+            <p>Loadout talks to the PS5 over FTP. Start the FTP server on the PS5 first (ftpsrv uses port 2121, etaHEN's uses 1337). The PC and PS5 need to be on the same network.</p>
+            <div class="ps5grid">
+              <label>PS5 IP address<input id="ps5ip" placeholder="192.168.1.50" inputmode="decimal" spellcheck="false"></label>
+              <label>Port<input id="ps5port" inputmode="numeric" class="port"></label>
+            </div>
+            <div class="addrow"><button class="btn ghost" id="ps5test">Test connection</button><button class="btn ghost" id="ps5speed" title="Times a short test upload and explains what limits the speed">Check network speed</button></div>
+            <div id="ps5result" class="result resultline"></div>
+          </div>
+          <div class="set" data-tab="ps5">
+            <h3>My PS5 firmware</h3>
+            <p>Games that need a newer firmware than yours get a coral tag in the library.</p>
+            <input id="fw" placeholder="e.g. 9.60" inputmode="decimal" class="short">
+          </div>
+          <div class="set" data-tab="send">
+            <h3>Where games go</h3>
+            <label class="block">Send images to this folder on the PS5
+              <div class="addrow tight"><input id="ps5dir" spellcheck="false" class="grow"><button class="btn ghost" id="ps5browse">Browse PS5</button></div>
+            </label>
+            <div class="quick" id="ps5quick"></div>
+            <div class="drives" id="ps5drives"></div>
+            <label class="switch"><input type="checkbox" id="sendAfter"><span></span>Turn on "Send to PS5" for games I pick to build <small>you can still switch it off per game on the Build &amp; send screen</small></label>
+          </div>
+          <div class="set" data-tab="send">
+            <h3>How games are sent</h3>
+            <label class="switch"><input type="checkbox" id="useP5U"><span></span>Send games with PS5Upload <small>Loadout loads PS5Upload's helper on the PS5 and sends games through it. Every game is checked after it lands, and a cut-off send picks up where it stopped. If it can't start, Loadout sends over FTP instead. Turn this off to always use FTP</small></label>
+            <h3>Speed</h3>
+            <label class="switch"><input type="checkbox" id="fastSend"><span></span>Fast send for FTP (experimental) <small>Only used when a game goes over FTP. Loadout loads its own small receiver on the PS5 and sends games through it. It has not beaten plain FTP on a real PS5 yet, so it is off unless you turn it on. Use "Test fast send" to compare the two on your setup</small></label>
+            <div class="addrow">
+              <label class="inline">Games sent at the same time<select id="sendAtOnce"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
+            </div>
+            <div class="addrow" id="fastOpts">
+              <label class="inline">Connections per game<select id="sendStreams"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
+              
+            </div>
+            <div class="addrow"><button class="btn ghost" id="recvtest" title="Checks that the fast receiver loads on the PS5 and times it against plain FTP">Test fast send</button><button class="btn ghost" id="ps5clean" title="Deletes half-sent images (.part files) from the PS5 folder">Remove unfinished uploads</button></div>
+            <div id="sendResult" class="result resultline"></div>
+          </div>
+          <div class="set" data-tab="phone" id="remoteset">
+            <h3>Phone remote</h3>
+            <p>Check builds and transfers from your phone, and start or stop them, even when you're away. Loadout serves a small page from this PC. It's off until you turn it on, and it needs a PIN.</p>
+            <label class="switch"><input type="checkbox" id="remoteOn"><span></span>Turn on the phone page</label>
+            <div class="ps5grid">
+              <label>PIN (4 or more digits)<input id="remotePin" inputmode="numeric" maxlength="12" autocomplete="off" spellcheck="false" class="port" style="width:150px"></label>
+              <label>Port<input id="remotePort" inputmode="numeric" class="port"></label>
+            </div>
+            <div id="remoteInfo"></div>
+          </div>
+          <div class="set" data-tab="phone" id="alertset">
+            <h3>Phone alerts</h3>
+            <p>Get a notification when a batch finishes or something fails. Use either one, or both.</p>
+            <label class="block">ntfy topic <small>install the free ntfy app, subscribe to a topic name only you know, and type that same name here</small>
+              <input id="alertNtfy" placeholder="e.g. skelly-loadout-7391" spellcheck="false" autocomplete="off"></label>
+            <label class="block">Discord webhook link <small>in Discord: Server Settings › Integrations › Webhooks › New Webhook › Copy Webhook URL</small>
+              <input id="alertDiscord" placeholder="https://discord.com/api/webhooks/…" spellcheck="false" autocomplete="off"></label>
+            <div class="addrow"><button class="btn ghost" id="alertTest">Send a test alert</button><span id="alertResult" class="result"></span></div>
+          </div>
+          <div class="set" data-tab="library">
+            <h3>Library</h3>
+            <label class="switch"><input type="checkbox" id="showMissing"><span></span>Keep showing games that are no longer in the folder</label>
+            <label class="switch"><input type="checkbox" id="storeInfo"><span></span>Get game info and screenshots from the PlayStation Store <small>publisher, genre, release date, rating and description, looked up once per game by its ID and saved on your PC</small></label>
+            <div class="addrow"><button class="btn ghost" id="export">Export game list (CSV)</button>
+              <button class="btn ghost" id="clearMissing">Forget missing games</button></div>
+          </div>
+          <div class="set" data-tab="library">
+            <h3>Never touch</h3>
+            <p>Folders and files with these exact names are never renamed, searched or built. Files match without their extension.</p>
+            <div class="chips" id="ignored"></div>
+            <form class="addrow" id="addIgnore"><input id="ignoreName" placeholder="Folder name"><button class="btn ghost">Add</button>
+              <button type="button" class="btn ghost" id="resetIgnore">Reset to defaults</button></form>
+          </div>
+          <div class="set" data-tab="app" id="trayset">
+            <h3>When I close the window</h3>
+            <label class="switch"><input type="checkbox" id="closeToTray"><span></span>Keep Loadout running in the tray <small>builds, sends and the phone page keep going. Right-click the tray icon and choose Quit to close it for real.</small></label>
+            <label class="switch"><input type="checkbox" id="keepAwake"><span></span>Keep this PC awake while jobs are running <small>stops Windows from going to sleep in the middle of a build or transfer. The screen stays on too until the job is done.</small></label>
+            <div class="hint" id="awakeNotes"></div>
+          </div>
+          <div class="set about" data-tab="app" id="about"></div>
+        </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="dock" id="dock" hidden></div>
+  </main>
+</div>
+
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <button class="x" id="drawerClose" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  <div id="drawerBody"></div>
+</aside>
+<div class="scrim" id="scrim"></div>
+<div class="modal" id="modal" hidden><div class="card" role="dialog" aria-modal="true"><div id="modalBody"></div><div class="mbtns" id="modalBtns"></div></div></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E1420">
+<title>Loadout Remote</title>
+<style>
+:root { --ink:#0E1420; --ink2:#131B29; --surface:#182131; --raised:#22304A; --line:#2C3A55; --text:#E7ECF5; --muted:#8C9AB3; --faint:#5E6B84; --manila:#E9C46A; --mint:#5BC8A0; --coral:#EF6F6C; --sky:#59B8F0; color-scheme: dark; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: var(--ink); color: var(--text); font: 15px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; }
+body { padding: env(safe-area-inset-top) 0 calc(env(safe-area-inset-bottom) + 24px); }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: rgba(14,20,32,.92); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+header svg { width: 26px; height: 26px; flex: none; }
+header b { font-size: 17px; }
+header small { color: var(--faint); margin-left: auto; font-size: 12px; text-align: right; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); display: inline-block; margin-right: 6px; }
+.dot.on { background: var(--mint); } .dot.off { background: var(--coral); }
+main { padding: 14px 14px 0; max-width: 720px; margin: 0 auto; }
+h2 { font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: var(--faint); margin: 22px 4px 8px; font-weight: 600; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 10px; }
+.lane .top { display: flex; align-items: baseline; gap: 8px; }
+.lane .what { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lane .pct { font-variant-numeric: tabular-nums; color: var(--muted); }
+.track { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 10px 0 8px; }
+.track i { display: block; height: 100%; width: 0; background: var(--manila); transition: width .4s; }
+.track.ps5 i { background: var(--sky); }
+.lane .sub { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+.lane .sub span { flex: 1; }
+.stop { padding: 6px 14px; border-radius: 999px; border: 1px solid var(--coral); color: var(--coral); font-size: 13px; font-weight: 600; }
+.idle { color: var(--muted); }
+.summary { color: var(--mint); font-size: 14px; }
+.jobs { list-style: none; margin: 0; padding: 0; }
+.jobs li { display: flex; gap: 10px; align-items: baseline; padding: 8px 2px; border-top: 1px solid var(--line); font-size: 14px; }
+.jobs li:first-child { border-top: 0; }
+.jobs .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jobs .s { color: var(--muted); font-size: 12.5px; text-align: right; max-width: 55%; }
+.jobs .s.ok { color: var(--mint); } .jobs .s.bad { color: var(--coral); } .jobs .s.run { color: var(--manila); }
+.drives { display: flex; gap: 8px; flex-wrap: wrap; }
+.drives span { background: var(--raised); border-radius: 10px; padding: 8px 12px; font-size: 13px; color: var(--muted); }
+.drives b { color: var(--sky); display: block; font-size: 15px; }
+.search { width: 100%; padding: 11px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; margin-bottom: 10px; }
+.game { display: flex; align-items: center; gap: 12px; padding: 10px; }
+.game img, .game .ph { width: 54px; height: 54px; border-radius: 10px; object-fit: cover; background: var(--raised); flex: none; }
+.game .info { flex: 1; min-width: 0; }
+.game .info b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.game .info small { color: var(--muted); font-size: 12.5px; }
+.tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; margin-right: 4px; background: rgba(91,200,160,.16); color: var(--mint); }
+.tag.ps5 { background: rgba(89,184,240,.16); color: var(--sky); }
+.go { padding: 9px 14px; border-radius: 10px; background: var(--manila); color: #3A2E0E; font-weight: 700; font-size: 13.5px; flex: none; }
+.go[disabled] { opacity: .45; }
+.sheet { position: fixed; inset: 0; z-index: 20; background: rgba(5,8,14,.72); display: flex; align-items: flex-end; }
+.sheet[hidden] { display: none; }
+.sheet .box { width: 100%; max-width: 720px; margin: 0 auto; background: var(--ink2); border-radius: 18px 18px 0 0; border: 1px solid var(--line); padding: 18px 16px calc(env(safe-area-inset-bottom) + 18px); }
+.sheet h3 { margin: 0 0 4px; font-size: 18px; }
+.sheet p { margin: 0 0 14px; color: var(--muted); font-size: 13.5px; }
+.sheet .opt { display: block; width: 100%; text-align: left; padding: 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); margin-bottom: 8px; font-weight: 600; }
+.sheet .opt small { display: block; color: var(--muted); font-weight: 400; font-size: 12.5px; margin-top: 2px; }
+.sheet .opt[disabled] { opacity: .45; }
+.sheet select { width: 100%; padding: 12px; border-radius: 12px; background: var(--surface); color: var(--text); border: 1px solid var(--line); font: inherit; margin-bottom: 12px; }
+.sheet .cancel { display: block; width: 100%; padding: 12px; color: var(--muted); }
+#login { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+#login[hidden] { display: none; }
+#login form { width: 100%; max-width: 340px; text-align: center; }
+#login svg { width: 54px; height: 54px; }
+#login h1 { font-size: 22px; margin: 12px 0 4px; }
+#login p { color: var(--muted); margin: 0 0 18px; }
+#login input { width: 100%; padding: 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 22px; text-align: center; letter-spacing: .3em; }
+#login button { width: 100%; margin-top: 12px; padding: 14px; border-radius: 12px; background: var(--manila); color: #3A2E0E; font-weight: 700; font-size: 16px; }
+#login .err { color: var(--coral); min-height: 22px; margin-top: 10px; font-size: 14px; }
+#toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); background: var(--raised); border: 1px solid var(--line); padding: 10px 16px; border-radius: 12px; font-size: 14px; z-index: 30; max-width: 90vw; }
+#toast[hidden] { display: none; } #toast.bad { border-color: var(--coral); }
+.game { cursor: pointer; }
+.game.sel { border-color: var(--manila); background: #1E2838; }
+.game .tick { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line); flex: none; display: grid; place-items: center; font-size: 13px; font-weight: 800; color: #3A2E0E; }
+.game.sel .tick { background: var(--manila); border-color: var(--manila); }
+.pick { margin: 0 0 12px; }
+.pick > small { display: block; color: var(--muted); font-size: 12.5px; margin: 0 2px 6px; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip { padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); font-size: 13.5px; font-weight: 600; text-align: left; }
+.chip small { display: block; font-weight: 400; color: var(--muted); font-size: 11.5px; }
+.chip.on { border-color: var(--sky); background: rgba(89,184,240,.14); color: var(--sky); }
+#bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; background: var(--ink2); border-top: 1px solid var(--line); padding: 12px 14px calc(env(safe-area-inset-bottom) + 12px); }
+#bar[hidden] { display: none; }
+#bar .in { max-width: 720px; margin: 0 auto; }
+#bar .head { display: flex; align-items: center; margin-bottom: 10px; font-weight: 600; }
+#bar .head button { margin-left: auto; color: var(--muted); font-weight: 400; padding: 4px 8px; }
+#bar .acts { display: flex; gap: 8px; }
+#bar .acts button { flex: 1; padding: 11px 6px; border-radius: 10px; font-weight: 700; font-size: 13.5px; background: var(--raised); border: 1px solid var(--line); }
+#bar .acts button.main { background: var(--manila); color: #3A2E0E; border-color: var(--manila); }
+#bar .acts button[disabled] { opacity: .4; }
+body.hasbar { padding-bottom: 230px; }
+.hint { color: var(--faint); font-size: 12.5px; margin: -2px 4px 10px; }
+.pld { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
+.pld .info { flex: 1; min-width: 0; }
+.pld .info b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pld .info small { color: var(--muted); font-size: 12.5px; }
+.go.sky { background: var(--sky); color: #08223A; }
+.empty { color: var(--muted); text-align: center; padding: 18px 8px; }
+</style>
+</head>
+<body>
+<div id="login" hidden>
+  <form id="loginForm">
+    <svg viewBox="0 0 32 32"><path d="M5 9.5A2.5 2.5 0 0 1 7.5 7H20l7 9-7 9H7.5A2.5 2.5 0 0 1 5 22.5z" fill="#E9C46A"/><circle cx="10.5" cy="16" r="2" fill="#0E1420"/></svg>
+    <h1>Loadout Remote</h1>
+    <p>Enter the PIN you set in Loadout on your PC.</p>
+    <input id="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="12" aria-label="PIN">
+    <button type="submit">Unlock</button>
+    <div class="err" id="loginErr" role="alert"></div>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <svg viewBox="0 0 32 32"><path d="M5 9.5A2.5 2.5 0 0 1 7.5 7H20l7 9-7 9H7.5A2.5 2.5 0 0 1 5 22.5z" fill="#E9C46A"/><circle cx="10.5" cy="16" r="2" fill="#0E1420"/></svg>
+    <b>Loadout</b>
+    <small id="hdr"></small>
+  </header>
+  <main>
+    <h2>Right now</h2>
+    <div id="lanes"></div>
+    <div id="jobsCard" class="card" hidden><ul class="jobs" id="jobs"></ul></div>
+    <h2 id="drvHead" hidden>PS5 free space</h2>
+    <div class="drives" id="drives"></div>
+    <h2 id="pldHead" hidden>Payloads</h2>
+    <div id="plds"></div>
+    <h2>Your games</h2>
+    <input class="search" id="q" type="search" placeholder="Search games" autocomplete="off">
+    <div class="hint">Tap games to pick several, or tap Start for just one.</div>
+    <div id="games"></div>
+  </main>
+</div>
+
+<div id="bar" hidden><div class="in" id="barIn"></div></div>
+<div class="sheet" id="sheet" hidden><div class="box" id="sheetBox"></div></div>
+<div id="toast" hidden role="status"></div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const size = n => { if (!n) return ""; const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0; while (n >= 1024 && i < 4) { n /= 1024; i++; } return (n >= 100 || i === 0 ? n.toFixed(0) : n.toFixed(1)) + " " + u[i]; };
+const dur = s => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h ? `${h}h ${String(m).padStart(2, "0")}m` : m ? `${m}m ${String(s % 60).padStart(2, "0")}s` : `${s}s`; };
+let S = null, timer = null, sheetKey = null;
+const sel = new Set(), sending = new Set();
+let drive = ""; try { drive = localStorage.getItem("loadoutDrive") || ""; } catch (e) {}
+// the PS5 drive games go to: the one picked here, else the PC's default
+function curDrive() { const ds = S.drives || []; return ds.some(d => d.root === drive) ? drive : (ds.some(d => d.root === S.drive) ? S.drive : (ds[0] || {}).root || ""); }
+function driveChips() {
+  const ds = S.drives || []; if (!S.hasPs5 || !ds.length) return "";
+  const cur = curDrive();
+  return `<div class="pick"><small>Send to which PS5 drive?</small><div class="chips">${ds.map(d => `<button class="chip ${d.root === cur ? "on" : ""}" data-drive="${esc(d.root)}">${esc(d.short)}<small>${d.free >= 0 ? size(d.free) + " free" : esc(d.root)}</small></button>`).join("")}</div></div>`;
+}
+function renderBar() {
+  for (const k of [...sel]) if (!S.games.some(g => g.key === k && !g.busy)) sel.delete(k);
+  const picked = S.games.filter(g => sel.has(g.key));
+  $("#bar").hidden = !picked.length; document.body.classList.toggle("hasbar", !!picked.length);
+  if (!picked.length) return;
+  const nb = picked.filter(g => g.canBuild && !g.hasImage).length, ns = picked.filter(g => g.hasImage).length, canPs5 = S.hasPs5;
+  $("#barIn").innerHTML = `<div class="head">${picked.length} game${picked.length > 1 ? "s" : ""} picked<button data-bar="clear">Clear</button></div>${driveChips()}
+    <div class="acts"><button data-bar="build" ${nb && !S.build.busy ? "" : "disabled"}>Build${nb ? " " + nb : ""}</button>
+    ${canPs5 ? `<button class="main" data-bar="buildsend" ${(nb && !S.build.busy) || ns ? "" : "disabled"}>Build + send</button>
+    <button data-bar="send" ${ns ? "" : "disabled"}>Send${ns ? " " + ns : ""}</button>` : ""}</div>`;
+}
+// start work for a set of games: "build", "send", or "buildsend"
+async function start(what, keys) {
+  const gs = S.games.filter(g => keys.includes(g.key)), d = curDrive();
+  const toBuild = gs.filter(g => g.canBuild && !g.hasImage).map(g => g.key), toSend = gs.filter(g => g.hasImage).map(g => g.key);
+  let did = 0;
+  if (what !== "build" && toSend.length) { await call("/r/send", { keys: toSend, drive: d }); did += toSend.length; }
+  if (what !== "send" && toBuild.length) { await call("/r/build", { keys: toBuild, send: what === "buildsend", drive: d }); did += toBuild.length; }
+  if (!did) throw new Error(what === "send" ? "Those games don't have an image yet. Build them first." : "Nothing to build: those games already have an image.");
+}
+
+function toast(msg, bad) {
+  const t = $("#toast"); t.textContent = msg; t.className = bad ? "bad" : ""; t.hidden = false;
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.hidden = true, bad ? 5000 : 3000);
+}
+async function call(path, body) {
+  const r = await fetch(path, { method: body ? "POST" : "GET", headers: body ? { "Content-Type": "application/json", "X-Loadout": "1" } : {}, body: body ? JSON.stringify(body) : undefined, credentials: "same-origin" });
+  const j = await r.json().catch(() => ({ error: "The PC sent something unexpected." }));
+  if (r.status === 401 && j.login) { showLogin(); throw new Error("locked"); }
+  if (j.error) throw new Error(j.error);
+  return j;
+}
+function showLogin() { clearTimeout(timer); $("#app").hidden = true; $("#login").hidden = false; setTimeout(() => $("#pin").focus(), 50); }
+$("#loginForm").onsubmit = async e => {
+  e.preventDefault();
+  $("#loginErr").textContent = "";
+  try {
+    const r = await fetch("/r/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin: $("#pin").value }), credentials: "same-origin" });
+    const j = await r.json();
+    if (!j.ok) { $("#loginErr").textContent = j.error || "Wrong PIN."; $("#pin").value = ""; return; }
+    $("#pin").value = ""; $("#login").hidden = true; poll();
+  } catch (err) { $("#loginErr").textContent = "Can't reach your PC. Is Loadout running?"; }
+};
+
+function laneHTML(l, cls, idle, lane) {
+  if (!l.busy && !l.total) return `<div class="card lane"><div class="idle">${idle}</div></div>`;
+  const what = l.busy ? (l.what || "Waiting for the next job") : "Finished";
+  return `<div class="card lane"><div class="top"><div class="what">${esc(what)}</div><div class="pct">${Math.floor(l.pct / 10)}%</div></div>
+    <div class="track ${cls}"><i style="width:${l.pct / 10}%"></i></div>
+    <div class="sub"><span>${l.done} of ${l.total} done${l.busy && l.speed ? " · " + size(l.speed) + "/s" : ""}${l.busy && l.eta ? " · " + dur(l.eta) + " left" : ""}</span>
+    ${l.busy ? `<button class="stop" data-stop="${lane}">Stop</button>` : ""}</div></div>`;
+}
+function render() {
+  $("#hdr").innerHTML = `${esc(S.pc)}<br>${S.hasPs5 ? `<span class="dot ${S.ps5Online ? "on" : "off"}"></span>PS5 ${S.ps5Online ? "online" : "offline"}` : "v" + esc(S.version)}`;
+  $("#lanes").innerHTML = laneHTML(S.build, "", "Not building anything.", "build") + laneHTML(S.ps5, "ps5", "Nothing going to the PS5.", "ps5")
+    + (S.summary && !S.build.busy && !S.ps5.busy ? `<div class="card summary">${esc(S.summary)}</div>` : "");
+  $("#jobsCard").hidden = !S.jobs.length;
+  $("#jobs").innerHTML = S.jobs.map(j => {
+    const live = ["building", "verifying", "sending", "moving", "deleting", "removing"].includes(j.state);
+    const cls = j.state === "done" ? "ok" : j.state === "failed" ? "bad" : live ? "run" : "";
+    const label = { queued: "Queued", building: "Building " + Math.floor(j.pct / 10) + "%", verifying: "Checking " + Math.floor(j.pct / 10) + "%", sending: "Sending " + Math.floor(j.pct / 10) + "%", moving: "Moving " + Math.floor(j.pct / 10) + "%", deleting: "Deleting", removing: "Removing folder", done: j.note || "Done", failed: "Failed: " + j.note, cancelled: "Stopped", skipped: "Already built" }[j.state] || j.state;
+    return `<li><span class="n">${esc(j.name)}</span><span class="s ${cls}">${esc(label)}${live && j.note && !/^\(/.test(j.note) ? "" : j.note && /^\(/.test(j.note) ? " " + esc(j.note) : ""}</span></li>`;
+  }).join("");
+  const ds = (S.drives || []).filter(d => d.free >= 0);
+  $("#drvHead").hidden = !ds.length;
+  $("#drives").innerHTML = ds.map(d => `<span><b>${size(d.free)}</b>${esc(d.short)}</span>`).join("");
+  const ps = S.payloads || [];
+  $("#pldHead").hidden = !ps.length;
+  $("#plds").innerHTML = ps.map(p => `<div class="card pld"><div class="info"><b>${esc(p.name)}</b><small>${p.missing ? "File not found on the PC" : esc(p.known === "shsrv" ? "Free-space shell" : p.known === "ftpsrv" ? "FTP server" : size(p.size > 0 ? p.size : 0))}</small></div>
+      <button class="go sky" data-pld="${p.i}" data-pname="${esc(p.name)}" ${p.missing || !S.hasPs5 || sending.has(p.i) ? "disabled" : ""}>${sending.has(p.i) ? "Sending" : "Send"}</button></div>`).join("");
+  const q = $("#q").value.trim().toLowerCase();
+  const list = S.games.filter(g => !q || (g.name + " " + g.id).toLowerCase().includes(q));
+  $("#games").innerHTML = list.length ? list.map(g => `<div class="card game ${sel.has(g.key) ? "sel" : ""}" data-pick="${esc(g.key)}">
+      <span class="tick">${sel.has(g.key) ? "✓" : ""}</span>
+      ${g.cover ? `<img alt="" loading="lazy" src="/r/cover?k=${encodeURIComponent(g.cover)}" onerror="this.outerHTML='<div class=ph></div>'">` : `<div class="ph"></div>`}
+      <div class="info"><b>${esc(g.name)}</b><small>${g.hasImage ? `<span class="tag">exFAT</span>` : ""}${g.onPs5 ? `<span class="tag ps5">On PS5</span>` : ""}${esc(size(g.size))}</small></div>
+      <button class="go" data-game="${esc(g.key)}" ${g.busy ? "disabled" : ""}>${g.busy ? "Working" : "Start"}</button></div>`).join("")
+    : `<div class="empty">${S.games.length ? "Nothing matches." : "No games in the library yet."}</div>`;
+  renderBar();
+}
+async function poll() {
+  clearTimeout(timer);
+  try {
+    S = await call("/r/state");
+    $("#login").hidden = true; $("#app").hidden = false;
+    render();
+  } catch (e) { if (e.message !== "locked" && S) toast("Lost contact with your PC.", true); if (e.message === "locked") return; }
+  timer = setTimeout(poll, S && (S.build.busy || S.ps5.busy) ? 1500 : 5000);
+}
+function openSheet(key) {
+  const g = S.games.find(x => x.key === key); if (!g) return;
+  sheetKey = key;
+  const canPs5 = S.hasPs5, drv = driveChips();
+  $("#sheetBox").innerHTML = `<h3>${esc(g.name)}</h3><p>${esc(g.id)}${g.size ? " · " + size(g.size) : ""}${g.onPs5 ? " · already on the PS5" : ""}</p>${canPs5 ? drv : ""}
+    ${g.canBuild && !g.hasImage ? `<button class="opt" data-do="build" ${S.build.busy ? "disabled" : ""}>Build image<small>${S.build.busy ? "A build is already running" : "Makes the exFAT image on your PC"}</small></button>` : ""}
+    ${g.canBuild && !g.hasImage && canPs5 ? `<button class="opt" data-do="buildsend" ${S.build.busy ? "disabled" : ""}>Build, then send to PS5<small>Sends as soon as the image is ready</small></button>` : ""}
+    ${g.hasImage && canPs5 ? `<button class="opt" data-do="send">Send to PS5<small>${S.ps5Online ? "Uploads the image you already built" : "The PS5 looks offline, but you can still try"}</small></button>` : ""}
+    ${!g.canBuild && !g.hasImage ? `<p>Nothing can be started for this game from here.</p>` : ""}
+    <button class="cancel" data-do="close">Cancel</button>`;
+  $("#sheet").hidden = false;
+}
+document.addEventListener("click", async e => {
+  const ch = e.target.closest("[data-drive]");
+  if (ch) {
+    drive = ch.dataset.drive; try { localStorage.setItem("loadoutDrive", drive); } catch (err) {}
+    document.querySelectorAll("[data-drive]").forEach(b => b.classList.toggle("on", b.dataset.drive === drive));
+    return;
+  }
+  const bb = e.target.closest("[data-bar]");
+  if (bb) {
+    if (bb.dataset.bar === "clear") { sel.clear(); return render(); }
+    const keys = [...sel];
+    try { await start(bb.dataset.bar, keys); sel.clear(); toast("Started."); poll(); } catch (err) { toast(err.message, true); }
+    return;
+  }
+  const g = e.target.closest("[data-game]"); if (g) return openSheet(g.dataset.game);
+  const pk = e.target.closest("[data-pick]");
+  if (pk) {
+    const k = pk.dataset.pick, gm = S.games.find(x => x.key === k);
+    if (gm && !gm.busy) { sel.has(k) ? sel.delete(k) : sel.add(k); render(); }
+    return;
+  }
+  const pb = e.target.closest("[data-pld]");
+  if (pb) {
+    const i = +pb.dataset.pld; if (sending.has(i)) return;
+    sending.add(i); render();
+    try { const r = await call("/r/payload", { i, name: pb.dataset.pname }); toast((r.data && r.data.msg) || "Sent."); }
+    catch (err) { if (err.message !== "locked") toast(err.message, true); }
+    sending.delete(i); poll();
+    return;
+  }
+  const st = e.target.closest("[data-stop]");
+  if (st) {
+    if (!confirm(st.dataset.stop === "build" ? "Stop building? The image in progress is deleted." : "Stop the PS5 jobs? Anything half-sent is removed.")) return;
+    try { await call("/r/stop", { lane: st.dataset.stop }); toast("Stopping…"); poll(); } catch (err) { toast(err.message, true); }
+    return;
+  }
+  const d = e.target.closest("[data-do]");
+  if (d) {
+    const what = d.dataset.do;
+    $("#sheet").hidden = true;
+    if (what === "close") return;
+    try { await start(what, [sheetKey]); toast("Started."); poll(); } catch (err) { toast(err.message, true); }
+    return;
+  }
+  if (e.target.id === "sheet") $("#sheet").hidden = true;
+});
+$("#q").oninput = () => S && render();
+document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
+poll();
+</script>
+</body>
+</html>
