@@ -191,6 +191,7 @@ function dlcCount(it) { return (it.dlc || []).length + (it.incoming || []).lengt
 function render() {
   $("#ver").textContent = "v" + S.version;
   $("#folderPath").textContent = S.settings.Folder || "Choose your games folder";
+  { const n = (S.settings.MoreFolders || []).length; $("#moreFolders").textContent = n ? `+${n} more folder${n === 1 ? "" : "s"}` : "+ Folder"; $("#moreFolders").hidden = !S.settings.Folder; }
   $("#rescan").disabled = !S.settings.Folder || S.scanning || S.build.building;
   const present = games().filter(i => i.present || i.exfatOnly);
   const total = present.reduce((a, i) => a + (i.size || 0), 0);
@@ -1244,6 +1245,22 @@ function toast(msg, bad) {
 }
 
 // ---------------- actions ----------------
+// more folders with games: the library reads all of them
+async function manageFolders() {
+  const more = S.settings.MoreFolders || [];
+  const r = await modal(`<h3>Game folders</h3><p>Loadout reads games from every folder here. The main folder is the one at the top of the window; renaming and DLC work inside each folder. A folder on a drive that isn't plugged in is skipped until it's back.</p>
+    <ul class="ftplist"><li><button disabled>${ICON.folder}<span><b>${esc(S.settings.Folder)}</b> (main)</span></button></li>
+    ${more.map(f => `<li><button data-pick="${esc(f)}" title="Stop reading games from this folder">${ICON.folder}<span>${esc(f)}</span><span class="grow"></span>${ICON.trash}Remove</button></li>`).join("")}</ul>`,
+    [{ label: "Done" }, { label: "Add a folder", cls: "primary" }]);
+  if (!r) return;
+  if (r.pick) {
+    if (await confirmBox("Stop reading this folder?", `Loadout stops listing the games in <b>${esc(r.pick)}</b>. Nothing in the folder is changed.`, "Remove", "danger solid")) act("folders/remove", { Path: r.pick }, "Folder removed. Rescanning.");
+    return;
+  }
+  if (r.i !== 1) return;
+  const p = await api("pick", { title: "Pick another folder that holds game folders", start: "" }).catch(e => toast(e.message, true));
+  if (p) act("folders/add", { Path: p }, "Folder added. Scanning it now.");
+}
 async function pickGames() {
   const p = await api("pick", { title: "Pick the folder that holds your game folders", start: S.settings.Folder }).catch(e => toast(e.message, true));
   if (p) act("scan", { folder: p });
@@ -1407,6 +1424,7 @@ function saveDLCPattern() { clearTimeout(dlcTimer); dlcTimer = setTimeout(() => 
 function savePattern() { clearTimeout(patTimer); patTimer = setTimeout(() => act("settings", { pattern: $("#pattern").value }), 250); }
 
 $("#pickFolder").onclick = pickGames;
+$("#moreFolders").onclick = manageFolders;
 $("#rescan").onclick = () => act("scan", {});
 $("#q").oninput = () => renderLibrary();
 $("#pattern").oninput = savePattern;

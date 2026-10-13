@@ -683,7 +683,7 @@ button.pcchip:hover { background: var(--raised); }
 .navgroup { margin: 14px 10px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--faint); }
 .navgroup:first-of-type { margin-top: 6px; }
 .navspace { flex: 1; min-height: 10px; }
-body[data-side="ps5"] .folderbar #pickFolder, body[data-side="ps5"] .folderbar #rescan { visibility: hidden; }
+body[data-side="ps5"] .folderbar #pickFolder, body[data-side="ps5"] .folderbar #moreFolders, body[data-side="ps5"] .folderbar #rescan { visibility: hidden; }
 #fastOpts[hidden] { display: none; }
 
 .profcard { display: flex; gap: 18px; align-items: flex-start; }

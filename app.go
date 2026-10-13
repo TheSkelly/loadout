@@ -32,6 +32,7 @@ var uiFiles embed.FS
 
 type Settings struct {
 	Folder      string
+	MoreFolders []string `json:",omitempty"` // more folders with games, scanned along with Folder
 	ShowMissing bool
 	Ignored     []string
 	Pattern     string
@@ -410,8 +411,8 @@ func (a *App) imageDirsLocked() []string {
 		dirs = append(dirs, d)
 	}
 	add(a.outDir())
-	if a.cfg.Folder != "" {
-		add(filepath.Join(a.cfg.Folder, "exFAT Images"))
+	for _, f := range a.gameFoldersLocked() {
+		add(filepath.Join(f, "exFAT Images"))
 	}
 	for _, d := range a.cfg.ImageDirs {
 		add(d)
@@ -823,24 +824,132 @@ func (a *App) startScan(folder string) error {
 	saveJSON("settings.json", a.cfg)
 	a.scanning, a.scanErr = true, ""
 	known, ignored, saved := a.lib.KnownNames(), append([]string(nil), a.cfg.Ignored...), copyMap(a.saved)
+	roots := a.gameFoldersLocked()
 	a.mu.Unlock()
 
 	go func() {
-		games, err := scan(folder, saved, known, ignored)
+		// every games folder is scanned on its own: a folder's scan only
+		// marks its own games missing, and DLC is matched within a folder
+		var games []*Game
+		found := map[string][]*Game{}
+		var errs []string
+		for i, root := range roots {
+			g, err := scan(root, saved, known, ignored)
+			if err != nil {
+				if i == 0 {
+					a.mu.Lock()
+					a.scanning, a.scanErr = false, err.Error()
+					a.mu.Unlock()
+					return
+				}
+				errs = append(errs, fmt.Sprintf("%s couldn't be read (%v), so its games are left as they were.", root, err))
+				continue
+			}
+			found[root] = g
+			games = append(games, g...)
+		}
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		a.scanning = false
-		if err != nil {
-			a.scanErr = err.Error()
-			return
-		}
+		a.scanErr = strings.Join(errs, " ")
 		a.games = games
-		updateLibrary(a.lib, folder, games)
+		for _, root := range roots {
+			if g, ok := found[root]; ok {
+				updateLibrary(a.lib, root, g)
+			}
+		}
+		a.lib.Root = folder
 		saveJSON("library.json", a.lib)
 		a.replanLocked()
 		a.startSizesLocked()
 	}()
 	return nil
+}
+
+// gameFoldersLocked is the main games folder, then the others, without
+// repeats. A folder that isn't there right now (an unplugged drive) is left
+// out, so its games aren't marked missing.
+func (a *App) gameFoldersLocked() []string {
+	var out []string
+	for _, f := range append([]string{a.cfg.Folder}, a.cfg.MoreFolders...) {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		dup := false
+		for _, x := range out {
+			if strings.EqualFold(filepath.Clean(x), filepath.Clean(f)) {
+				dup = true
+			}
+		}
+		if st, err := os.Stat(f); dup || (len(out) > 0 && (err != nil || !st.IsDir())) {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
+// addGameFolder adds a folder with more games and rescans.
+func (a *App) addGameFolder(p string) error {
+	p = filepath.Clean(strings.TrimSpace(p))
+	if st, err := os.Stat(p); err != nil || !st.IsDir() {
+		return fmt.Errorf("That folder doesn't exist: %s", p)
+	}
+	a.mu.Lock()
+	if a.cfg.Folder == "" {
+		a.mu.Unlock()
+		return a.startScan(p) // the first folder is the main one
+	}
+	for _, f := range append([]string{a.cfg.Folder}, a.cfg.MoreFolders...) {
+		f = filepath.Clean(f)
+		if strings.EqualFold(f, p) {
+			a.mu.Unlock()
+			return errors.New("Loadout already reads games from that folder.")
+		}
+		if rel, err := filepath.Rel(f, p); err == nil && !strings.HasPrefix(rel, "..") {
+			a.mu.Unlock()
+			return fmt.Errorf("That folder is inside %s, which Loadout already reads. Pick a folder outside it.", f)
+		}
+		if rel, err := filepath.Rel(p, f); err == nil && !strings.HasPrefix(rel, "..") {
+			a.mu.Unlock()
+			return fmt.Errorf("%s is inside that folder. Pick a folder that doesn't hold one Loadout already reads.", f)
+		}
+	}
+	a.cfg.MoreFolders = append(a.cfg.MoreFolders, p)
+	saveJSON("settings.json", a.cfg)
+	a.mu.Unlock()
+	return a.startScan("")
+}
+
+// removeGameFolder stops reading a folder; its games leave the library list
+// (they're kept in the library's records, as games that aren't here).
+func (a *App) removeGameFolder(p string) error {
+	a.mu.Lock()
+	kept := a.cfg.MoreFolders[:0]
+	gone := false
+	for _, f := range a.cfg.MoreFolders {
+		if strings.EqualFold(filepath.Clean(f), filepath.Clean(p)) {
+			gone = true
+			continue
+		}
+		kept = append(kept, f)
+	}
+	a.cfg.MoreFolders = kept
+	if gone {
+		for _, e := range a.lib.Games {
+			if sameRoot(e.Folder, p) {
+				e.Present = false
+			}
+		}
+		saveJSON("settings.json", a.cfg)
+		saveJSON("library.json", a.lib)
+	}
+	a.mu.Unlock()
+	if !gone {
+		return errors.New("Loadout isn't reading that folder.")
+	}
+	return a.startScan("")
 }
 
 func copyMap(m map[string]string) map[string]string {
@@ -2050,6 +2159,16 @@ func (a *App) handler() http.Handler {
 			os.MkdirAll(b.Path, 0755)
 		}
 		return nil, openPath(b.Path, b.Select)
+	})
+	api("/api/folders/add", func(r *http.Request) (any, error) {
+		var b struct{ Path string }
+		body(r, &b)
+		return nil, a.addGameFolder(b.Path)
+	})
+	api("/api/folders/remove", func(r *http.Request) (any, error) {
+		var b struct{ Path string }
+		body(r, &b)
+		return nil, a.removeGameFolder(b.Path)
 	})
 	api("/api/pick", func(r *http.Request) (any, error) {
 		var b struct{ Title, Start string }
