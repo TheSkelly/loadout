@@ -18,7 +18,8 @@ import (
 )
 
 // The downloads folder: a catch-all folder (games, movies, anything) that
-// Loadout checks every few minutes for PS5 games packed in archives, the way
+// Loadout checks every few minutes for PS5 games (and Switch games, which go
+// to the ROM library) packed in archives, the way
 // releases come (split RAR sets: .rar + .r00..., or .part01.rar...; also ZIP
 // and 7z). A set is extracted once its download is finished: every part an
 // .sfv lists is there and nothing in its folder has changed for a while.
@@ -217,9 +218,17 @@ func downloadDone(s archiveSet) (bool, string) {
 	return true, ""
 }
 
-// archiveInfo lists an archive with 7-Zip: whether it holds a PS5 game, its
-// title ID, and how big it is unpacked.
-func archiveInfo(tool, first string) (ps5 bool, id string, size int64, err error) {
+// archiveLook is what 7-Zip's listing of an archive says.
+type archiveLook struct {
+	ps5        bool   // holds a PS5 game (sce_sys/param.json)
+	id         string // its title ID
+	size       int64  // unpacked
+	switchGame bool   // holds a Switch game (.nsp, .xci, .nsz, .xcz)
+}
+
+// archiveInfo lists an archive with 7-Zip to see what's inside.
+func archiveInfo(tool, first string) (archiveLook, error) {
+	var l archiveLook
 	// a big set (hundreds of parts) can take 7-Zip many minutes to list
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -227,24 +236,28 @@ func archiveInfo(tool, first string) (ps5 bool, id string, size int64, err error
 	hideChild(c)
 	out, err := c.Output()
 	if ctx.Err() != nil {
-		return false, "", 0, errors.New("7-Zip took too long to list it")
+		return l, errors.New("7-Zip took too long to list it")
 	}
 	if err != nil {
-		return false, "", 0, fmt.Errorf("7-Zip couldn't read it: %v", err)
+		return l, fmt.Errorf("7-Zip couldn't read it: %v", err)
 	}
 	for _, line := range strings.Split(string(out), "\n") {
-		low := strings.ToLower(strings.ReplaceAll(line, "/", `\`))
-		if strings.HasSuffix(strings.TrimSpace(low), `sce_sys\param.json`) {
-			ps5 = true
-			if id == "" {
-				id = findID(line)
+		t := strings.TrimSpace(line)
+		low := strings.ToLower(strings.ReplaceAll(t, "/", `\`))
+		if strings.HasSuffix(low, `sce_sys\param.json`) {
+			l.ps5 = true
+			if l.id == "" {
+				l.id = findID(t)
 			}
 		}
-		if m := sevenTotalRe.FindStringSubmatch(strings.TrimSpace(line)); m != nil {
-			size, _ = strconv.ParseInt(m[1], 10, 64)
+		if switchExtRe.MatchString(t) {
+			l.switchGame = true
+		}
+		if m := sevenTotalRe.FindStringSubmatch(t); m != nil {
+			l.size, _ = strconv.ParseInt(m[1], 10, 64)
 		}
 	}
-	return ps5, id, size, nil
+	return l, nil
 }
 
 // inLibraryLocked says whether a game is in the library already (a folder
@@ -271,14 +284,15 @@ func (a *App) watchLoop() {
 	}
 }
 
-// checkDownloads extracts the PS5 games that finished downloading.
+// checkDownloads extracts the PS5 games that finished downloading into the
+// games folder, and files Switch games in the ROM library.
 func (a *App) checkDownloads() {
 	if !watchMu.TryLock() {
 		return // a check (maybe a long extraction) is already running
 	}
 	defer watchMu.Unlock()
 	a.mu.Lock()
-	folder, games := strings.TrimSpace(a.cfg.WatchFolder), strings.TrimSpace(a.cfg.Folder)
+	folder, games, roms := strings.TrimSpace(a.cfg.WatchFolder), strings.TrimSpace(a.cfg.Folder), strings.TrimSpace(a.cfg.RomFolder)
 	on := folder != "" && boolOr(a.cfg.WatchOn, true)
 	a.watch.On, a.watch.Folder = on, folder
 	a.mu.Unlock()
@@ -290,55 +304,90 @@ func (a *App) checkDownloads() {
 	a.watch.NoTool = tool == ""
 	a.watch.Checked = time.Now().Format("3:04 PM")
 	a.mu.Unlock()
-	if tool == "" || games == "" {
+	if tool == "" {
 		return
 	}
 	recs := loadWatchRecords()
 	var waiting []string
+	noRoms := func(name string) {
+		waiting = append(waiting, name+": a Switch game. Pick your ROM library (Emulators › ROM library) and it goes there")
+	}
+
+	// Switch games that are already files (downloaded as is, or extracted by hand)
+	for _, f := range switchFiles(folder) {
+		key := strings.ToLower(f.path)
+		if r, ok := recs[key]; ok && r.Size == f.size {
+			continue
+		}
+		if !f.settled {
+			waiting = append(waiting, filepath.Base(f.path)+": still downloading")
+			continue
+		}
+		if roms == "" {
+			noRoms(filepath.Base(f.path))
+			continue
+		}
+		recs[key] = watchRecord{Size: f.size, When: time.Now(), Result: a.fileSwitchGame(f.path, roms)}
+		saveRecords(recs)
+	}
+
 	for _, s := range findArchiveSets(folder) {
-		if r, ok := recs[strings.ToLower(s.first)]; ok && r.Size == s.size {
+		key := strings.ToLower(s.first)
+		if r, ok := recs[key]; ok && r.Size == s.size {
 			continue // handled already, and it hasn't changed since
 		}
 		done, why := downloadDone(s)
+		named := ps5NameRe.MatchString(s.name) || ps5NameRe.MatchString(filepath.Base(s.first))
+		nsw := nswNameRe.MatchString(s.name) || nswNameRe.MatchString(filepath.Base(s.first))
 		if !done {
-			if strings.Contains(strings.ToLower(s.name), "ps5") {
+			if named || nsw {
 				waiting = append(waiting, s.name+": "+why)
 			}
 			continue
 		}
 		// a release named as a PS5 one is taken at its word, with the title ID
 		// from its .nfo; anything else is listed to see what's inside
-		var ps5 bool
-		var id string
-		var size int64
-		if ps5NameRe.MatchString(s.name) || ps5NameRe.MatchString(filepath.Base(s.first)) {
-			ps5, size = true, s.size+s.size/20
-			id, _ = readNFO(filepath.Dir(s.first))
+		var look archiveLook
+		if named {
+			look = archiveLook{ps5: true, size: s.size + s.size/20}
+			look.id, _ = readNFO(filepath.Dir(s.first))
 		} else {
 			var err error
-			if ps5, id, size, err = archiveInfo(tool, s.first); err != nil {
+			if look, err = archiveInfo(tool, s.first); err != nil {
 				if strings.Contains(err.Error(), "too long") {
-					recs[strings.ToLower(s.first)] = watchRecord{Size: s.size, Result: "not checked: " + err.Error()}
+					recs[key] = watchRecord{Size: s.size, Result: "not checked: " + err.Error()}
 					saveRecords(recs)
 				}
 				continue // a part is missing or it's damaged; try again next time
 			}
 		}
-		if !ps5 {
-			recs[strings.ToLower(s.first)] = watchRecord{Size: s.size, Result: "not a PS5 game"}
-			saveRecords(recs)
-			continue
+		switch {
+		case look.ps5:
+			if games == "" {
+				continue
+			}
+			a.mu.Lock()
+			have := a.inLibraryLocked(look.id)
+			a.mu.Unlock()
+			res := "already in the library (" + look.id + ")"
+			if !have {
+				res = a.extractGame(tool, s, look.size, games)
+			}
+			recs[key] = watchRecord{Size: s.size, When: time.Now(), Result: res}
+		case look.switchGame || nsw:
+			if len(switchFilesIn(filepath.Dir(s.first))) > 0 {
+				// extracted already, next to its parts: that file is filed (above)
+				recs[key] = watchRecord{Size: s.size, When: time.Now(), Result: "extracted already"}
+				break
+			}
+			if roms == "" {
+				noRoms(s.name)
+				continue
+			}
+			recs[key] = watchRecord{Size: s.size, When: time.Now(), Result: a.extractSwitch(tool, s, look.size, roms)}
+		default:
+			recs[key] = watchRecord{Size: s.size, Result: "not a PS5 or Switch game"}
 		}
-		a.mu.Lock()
-		have := a.inLibraryLocked(id)
-		a.mu.Unlock()
-		if have {
-			recs[strings.ToLower(s.first)] = watchRecord{Size: s.size, When: time.Now(), Result: "already in the library (" + id + ")"}
-			saveRecords(recs)
-			continue
-		}
-		res := a.extractGame(tool, s, size, games)
-		recs[strings.ToLower(s.first)] = watchRecord{Size: s.size, When: time.Now(), Result: res}
 		saveRecords(recs)
 	}
 	sort.Strings(waiting)
@@ -352,24 +401,8 @@ func saveRecords(recs map[string]watchRecord) {
 	os.WriteFile(filepath.Join(appDir(), "extracted.json"), b, 0644)
 }
 
-// extractGame unpacks one set into the games folder and rescans. It answers
-// what happened, for the record.
-func (a *App) extractGame(tool string, s archiveSet, size int64, games string) string {
-	name := strings.TrimSpace(s.name)
-	final := filepath.Join(games, name)
-	if _, err := os.Stat(final); err == nil {
-		return "extracted" // already in the games folder (extracted by hand, say)
-	}
-	if free := diskFree(games); free >= 0 && size > 0 && free < size+(1<<30) {
-		msg := fmt.Sprintf("Not enough space in %s to extract %s: needs %s, %s free.", games, name, humanSize(size), humanSize(free))
-		a.mu.Lock()
-		a.watch.Err = msg
-		a.notify("%s", msg)
-		a.mu.Unlock()
-		return msg
-	}
-	tmp := filepath.Join(games, ".loadout-extracting-"+name)
-	os.RemoveAll(tmp)
+// run7z extracts an archive set into dir, showing its progress as name.
+func (a *App) run7z(tool, first, dir, name string) error {
 	a.mu.Lock()
 	a.watch.Busy, a.watch.Current, a.watch.Pct, a.watch.Err = true, name, 0, ""
 	a.mu.Unlock()
@@ -378,14 +411,13 @@ func (a *App) extractGame(tool string, s archiveSet, size int64, games string) s
 		a.watch.Busy, a.watch.Current, a.watch.Pct = false, "", 0
 		a.mu.Unlock()
 	}()
-
-	c := exec.Command(tool, "x", s.first, "-o"+tmp, "-y", "-bsp1", "-bso0", "-bse1")
+	c := exec.Command(tool, "x", first, "-o"+dir, "-y", "-bsp1", "-bso0", "-bse1")
 	hideChild(c)
 	out, _ := c.StdoutPipe()
 	var errText strings.Builder
 	c.Stderr = &errText
 	if err := c.Start(); err != nil {
-		return a.extractFailed(name, tmp, err.Error())
+		return err
 	}
 	// 7-Zip redraws its progress with backspaces: read in chunks, keep the last percent
 	buf := make([]byte, 4096)
@@ -405,31 +437,219 @@ func (a *App) extractGame(tool string, s archiveSet, size int64, games string) s
 		}
 	}
 	if err := c.Wait(); err != nil {
-		msg := strings.TrimSpace(errText.String())
-		if msg == "" {
-			msg = err.Error()
+		if msg := strings.TrimSpace(errText.String()); msg != "" {
+			return errors.New(msg)
 		}
-		return a.extractFailed(name, tmp, msg)
+		return err
+	}
+	return nil
+}
+
+// roomFor reports (and records) a lack of space for size bytes in dir.
+func (a *App) roomFor(dir, name string, size int64) string {
+	if free := diskFree(dir); free >= 0 && size > 0 && free < size+(1<<30) {
+		msg := fmt.Sprintf("Not enough space in %s for %s: needs %s, %s free.", dir, name, humanSize(size), humanSize(free))
+		a.mu.Lock()
+		a.watch.Err = msg
+		a.notify("%s", msg)
+		a.mu.Unlock()
+		return msg
+	}
+	return ""
+}
+
+// extractGame unpacks one set into the games folder and rescans. It answers
+// what happened, for the record.
+func (a *App) extractGame(tool string, s archiveSet, size int64, games string) string {
+	name := strings.TrimSpace(s.name)
+	final := filepath.Join(games, name)
+	if _, err := os.Stat(final); err == nil {
+		return "extracted" // already in the games folder (extracted by hand, say)
+	}
+	if msg := a.roomFor(games, name, size); msg != "" {
+		return msg
+	}
+	tmp := filepath.Join(games, ".loadout-extracting-"+name)
+	os.RemoveAll(tmp)
+	if err := a.run7z(tool, s.first, tmp, name); err != nil {
+		return a.extractFailed(name, tmp, err.Error())
 	}
 	if err := os.Rename(tmp, final); err != nil {
 		return a.extractFailed(name, tmp, "couldn't move it into place: "+err.Error())
 	}
-	a.mu.Lock()
-	a.watch.Done = append(a.watch.Done, name)
-	a.notify("Extracted %s from your downloads folder into your games folder.", name)
-	recycleAfter := a.cfg.WatchRecycle
-	a.mu.Unlock()
-	if recycleAfter {
-		for _, p := range s.parts {
-			recycle(p, true)
-		}
-	}
+	a.extracted(name, "your games folder", s.parts)
 	go a.startScan("")
 	return "extracted"
 }
 
-func (a *App) extractFailed(name, tmp, why string) string {
+// extracted notes a finished download and recycles its archives if asked.
+func (a *App) extracted(name, where string, parts []string) {
+	a.mu.Lock()
+	a.watch.Done = append(a.watch.Done, name)
+	a.notify("Extracted %s from your downloads folder into %s.", name, where)
+	recycleAfter := a.cfg.WatchRecycle
+	a.mu.Unlock()
+	if recycleAfter {
+		for _, p := range parts {
+			recycle(p, true)
+		}
+	}
+}
+
+// ---------- Switch games ----------
+
+var (
+	switchExtRe = regexp.MustCompile(`(?i)\.(nsp|xci|nsz|xcz)$`)
+	nswNameRe   = regexp.MustCompile(`(?i)(^|[._ -])(NSW|Switch)([._ -]|$)`)
+)
+
+// switchDir is the ROM library's folder for Switch games: the one it already
+// has (named Switch, NSW, ProsperoEden...), or a new "Switch".
+func switchDir(roms string) string {
+	ents, _ := os.ReadDir(roms)
+	for _, e := range ents {
+		if e.IsDir() {
+			if id, _ := romEmu(e.Name()); id == edenID {
+				return filepath.Join(roms, e.Name())
+			}
+		}
+	}
+	return filepath.Join(roms, "Switch")
+}
+
+type switchFile struct {
+	path    string
+	size    int64
+	settled bool // done downloading
+}
+
+// switchFiles finds Switch game files in the downloads folder, its folders
+// and theirs (a release folder with the game extracted into a folder in it).
+func switchFiles(root string) []switchFile {
+	var out []switchFile
+	var look func(dir string, depth int)
+	look = func(dir string, depth int) {
+		ents, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		busy := false
+		for _, e := range ents {
+			if inProgressRe.MatchString(e.Name()) {
+				busy = true
+			}
+		}
+		for _, e := range ents {
+			if strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			p := filepath.Join(dir, e.Name())
+			if e.IsDir() {
+				if depth < 2 {
+					look(p, depth+1)
+				}
+				continue
+			}
+			if !switchExtRe.MatchString(e.Name()) {
+				continue
+			}
+			if fi, err := e.Info(); err == nil {
+				out = append(out, switchFile{p, fi.Size(), !busy && time.Since(fi.ModTime()) > watchSettle})
+			}
+		}
+	}
+	look(root, 0)
+	return out
+}
+
+// switchFilesIn lists the Switch game files in a release folder and its folders.
+func switchFilesIn(dir string) []string {
+	var out []string
+	filepath.WalkDir(dir, func(p string, e os.DirEntry, err error) error {
+		if err == nil && !e.IsDir() && switchExtRe.MatchString(e.Name()) {
+			out = append(out, p)
+		}
+		return nil
+	})
+	return out
+}
+
+// fileSwitchGame copies a Switch game file into the ROM library.
+func (a *App) fileSwitchGame(src, roms string) string {
+	dir := switchDir(roms)
+	dst := filepath.Join(dir, filepath.Base(src))
+	fi, err := os.Stat(src)
+	if err != nil {
+		return "gone"
+	}
+	if d, err := os.Stat(dst); err == nil && d.Size() == fi.Size() {
+		return "in the ROM library already"
+	}
+	if msg := a.roomFor(roms, filepath.Base(src), fi.Size()); msg != "" {
+		return msg
+	}
+	os.MkdirAll(dir, 0755)
+	a.mu.Lock()
+	a.watch.Busy, a.watch.Current, a.watch.Pct = true, filepath.Base(src), 0
+	a.mu.Unlock()
+	err = copyFile(src, dst+".part")
+	if err == nil {
+		err = os.Rename(dst+".part", dst)
+	}
+	a.mu.Lock()
+	a.watch.Busy, a.watch.Current = false, ""
+	a.mu.Unlock()
+	if err != nil {
+		os.Remove(dst + ".part")
+		return a.extractFailed(filepath.Base(src), "", "couldn't copy it into the ROM library: "+err.Error())
+	}
+	romMu.Lock()
+	romAt = time.Time{} // the PS5 app sees it on its next look
+	romMu.Unlock()
+	a.mu.Lock()
+	a.watch.Done = append(a.watch.Done, filepath.Base(src))
+	a.notify("Added %s from your downloads folder to the ROM library.", filepath.Base(src))
+	a.mu.Unlock()
+	return "added to the ROM library"
+}
+
+// extractSwitch unpacks a Switch release and files its game into the ROM library.
+func (a *App) extractSwitch(tool string, s archiveSet, size int64, roms string) string {
+	name := strings.TrimSpace(s.name)
+	dir := switchDir(roms)
+	if size <= 0 {
+		size = s.size
+	}
+	if msg := a.roomFor(roms, name, size); msg != "" {
+		return msg
+	}
+	os.MkdirAll(dir, 0755)
+	tmp := filepath.Join(dir, ".loadout-extracting-"+name)
 	os.RemoveAll(tmp)
+	if err := a.run7z(tool, s.first, tmp, name); err != nil {
+		return a.extractFailed(name, tmp, err.Error())
+	}
+	found := switchFilesIn(tmp)
+	if len(found) == 0 {
+		return a.extractFailed(name, tmp, "there's no Switch game file (.nsp, .xci) in it")
+	}
+	for _, f := range found {
+		if err := os.Rename(f, filepath.Join(dir, filepath.Base(f))); err != nil {
+			return a.extractFailed(name, tmp, "couldn't move it into the ROM library: "+err.Error())
+		}
+	}
+	os.RemoveAll(tmp)
+	romMu.Lock()
+	romAt = time.Time{}
+	romMu.Unlock()
+	a.extracted(name, "the ROM library", s.parts)
+	return "extracted to the ROM library"
+}
+
+func (a *App) extractFailed(name, tmp, why string) string {
+	if tmp != "" {
+		os.RemoveAll(tmp)
+	}
 	if len(why) > 300 {
 		why = why[:300]
 	}

@@ -114,3 +114,52 @@ func TestCheckDownloadsExtracts(t *testing.T) {
 		t.Error("an extracted download was extracted again")
 	}
 }
+
+func TestCheckDownloadsSwitch(t *testing.T) {
+	if sevenZip() == "" {
+		t.Skip("7-Zip isn't installed")
+	}
+	dl, games, roms := t.TempDir(), t.TempDir(), t.TempDir()
+	old := time.Now().Add(-time.Hour)
+	put := func(rel, body string) {
+		p := filepath.Join(dl, rel)
+		os.MkdirAll(filepath.Dir(p), 0755)
+		os.WriteFile(p, []byte(body), 0644)
+		os.Chtimes(p, old, old)
+	}
+	// a Switch release in a ZIP, a loose .nsp, and a release extracted by hand
+	dir := filepath.Join(dl, "Zelda.v002.NSW-BigBlueBox")
+	os.MkdirAll(dir, 0755)
+	f, _ := os.Create(filepath.Join(dir, "bbb.zip"))
+	w := zip.NewWriter(f)
+	x, _ := w.Create("bbb/Zelda [0100509005AF2000].xci")
+	x.Write([]byte("cart"))
+	w.Close()
+	f.Close()
+	os.Chtimes(filepath.Join(dir, "bbb.zip"), old, old)
+	put("Pokemon [0100000011D90000][v0].nsp", "nsp")
+	put("Mario.NSW-GRP/mario.zip", "not read: extracted already")
+	put("Mario.NSW-GRP/mario/Mario [0100000000010000].nsp", "nsp2")
+
+	// no ROM library yet: nothing moves, and it says why
+	a := &App{cfg: Settings{WatchFolder: dl, Folder: games}, lib: &Library{Games: map[string]*LibEntry{}}, scanning: true}
+	a.checkDownloads()
+	if len(a.watch.Waiting) == 0 {
+		t.Fatal("Switch games with no ROM library aren't reported")
+	}
+
+	a.cfg.RomFolder = roms
+	a.checkDownloads()
+	sw := filepath.Join(roms, "Switch")
+	for _, n := range []string{"Zelda [0100509005AF2000].xci", "Pokemon [0100000011D90000][v0].nsp", "Mario [0100000000010000].nsp"} {
+		if !fileExists(filepath.Join(sw, n)) {
+			t.Errorf("%s isn't in the ROM library: %+v", n, a.watch)
+		}
+	}
+	if ents, _ := os.ReadDir(sw); len(ents) != 3 {
+		t.Errorf("the Switch folder holds %d entries, want just the 3 games", len(ents))
+	}
+	if !fileExists(filepath.Join(dl, "Pokemon [0100000011D90000][v0].nsp")) {
+		t.Error("the downloaded file was taken away")
+	}
+}
