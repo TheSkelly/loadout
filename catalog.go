@@ -218,11 +218,15 @@ func (a *App) storeGamesLocked() []storeGame {
 
 func (a *App) storeStatusLocked() storeStatus {
 	rs := a.remoteStateLocked()
+	// on the PS5 a send is a download, and building is the PC getting it ready
+	rs.PS5.What = strings.Replace(rs.PS5.What, "Sending ", "Downloading ", 1)
+	rs.Build.What = strings.Replace(rs.Build.What, "Building ", "Preparing ", 1)
 	return storeStatus{Version: rs.Version, PC: rs.PC, Online: rs.Online, HasPS5: rs.HasPS5, Build: rs.Build, PS5: rs.PS5,
 		Games: a.storeProgressLocked(), Drives: rs.Drives, Drive: rs.Drive}
 }
 
-// storeGet builds (when needed) and sends one game to the PS5.
+// storeGet builds (when needed) and sends one game to the PS5. Its messages
+// are shown on the PS5, where this is called downloading.
 func (a *App) storeGet(key, drive string) (string, error) {
 	a.mu.Lock()
 	st := a.stateLocked()
@@ -231,7 +235,7 @@ func (a *App) storeGet(key, drive string) (string, error) {
 	building := a.build.Building
 	a.mu.Unlock()
 	if s := busy.State; s != "" && s != "sent" && s != "failed" {
-		return "", errors.New("That game is already on its way.")
+		return "", errors.New("That game is already downloading.")
 	}
 	for _, it := range st.Items {
 		if it.Key != key || it.IsDLC || it.IsFile {
@@ -245,18 +249,18 @@ func (a *App) storeGet(key, drive string) (string, error) {
 			if err := a.startSend([]sendItem{{Key: key, Name: name, Image: it.Image, Drive: drive}}); err != nil {
 				return "", err
 			}
-			return "Sending " + name + " to the PS5.", nil
+			return "Downloading " + name + ".", nil
 		}
 		if !it.CanBuild {
-			return "", errors.New("Loadout can't build that game yet. Check it on the PC.")
+			return "", errors.New("Your PC can't prepare that game yet. Check it in Loadout on the PC.")
 		}
 		if building {
-			return "", errors.New("The PC is building another game right now. Try again when it's done.")
+			return "", errors.New("Your PC is preparing another game right now. Try again when it's done.")
 		}
 		if err := a.startBuild([]string{key}, []string{key}, map[string]string{key: drive}, false); err != nil {
 			return "", err
 		}
-		return "Building " + name + " on the PC, then sending it to the PS5.", nil
+		return "Your PC is preparing " + name + ". The download starts when it's ready.", nil
 	}
 	return "", errors.New("That game isn't in Loadout's library any more.")
 }

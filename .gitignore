@@ -3,3 +3,5 @@ Loadout.exe
 *.exe~
 Loadout-Setup-*.exe
 *.syso
+# personal Claude Code settings
+.claude/settings.local.json

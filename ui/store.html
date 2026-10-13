@@ -129,7 +129,7 @@ main { padding: 8px 0 80px; }
     <div class="where" id="dWhere"></div>
     <div class="desc" id="dDesc"></div>
     <div id="dDrives" class="acts"></div>
-    <div class="acts"><button class="btn main" id="dGet">Send to PS5</button><button class="btn" id="dBack">Back</button></div>
+    <div class="acts"><button class="btn main" id="dGet">Download</button><button class="btn" id="dBack">Back</button></div>
     <div class="prog" id="dProg" hidden><div class="lbl" id="dProgLbl"></div><div class="track"><i id="dProgBar"></i></div><div class="note" id="dProgNote"></div></div>
     <div class="msg" id="dMsg"></div>
   </div>
@@ -180,7 +180,8 @@ let GAMES = [], STATUS = null, DRIVE = "", OPEN = null;
 const byKey = k => GAMES.find(g => g.key === k);
 const progOf = g => (STATUS && STATUS.games && STATUS.games[g.key]) || { state: g.state, pct: g.pct, note: g.note };
 const busy = p => p && p.state && !["sent", "failed", ""].includes(p.state);
-const stateWord = { queued: "Waiting", building: "Building on PC", waiting: "Waiting to send", sending: "Sending", sent: "Sent", failed: "Failed" };
+// on the PS5 this is a download; the PC and phone call the same thing "send"
+const stateWord = { queued: "Queued", building: "Preparing on PC", waiting: "Waiting to download", sending: "Downloading", sent: "Downloaded", failed: "Download failed" };
 
 async function loadGames() { const d = await api("/s/games"); GAMES = d.games || []; }
 async function loadStatus() { STATUS = await api("/s/status"); if (!DRIVE) DRIVE = STATUS.drive || ""; }
@@ -190,7 +191,7 @@ function tileHTML(g) {
   const p = progOf(g);
   let badge = "";
   if (busy(p)) badge = `<span class="badge run">${esc(stateWord[p.state] || p.state)}</span>`;
-  else if (p.state === "failed") badge = `<span class="badge bad">Failed</span>`;
+  else if (p.state === "failed") badge = `<span class="badge bad">Download failed</span>`;
   else if (g.onPs5) badge = `<span class="badge ps5">On PS5</span>`;
   else if (g.ready) badge = `<span class="badge">Ready</span>`;
   const bar = busy(p) && p.pct > 0 ? `<span class="bar"><i style="width:${p.pct / 10}%"></i></span>` : "";
@@ -207,7 +208,7 @@ function renderHome() {
   const recent = GAMES.filter(g => g.firstSeen).sort((a, b) => b.firstSeen.localeCompare(a.firstSeen)).slice(0, 12);
   const notOn = GAMES.filter(g => !g.onPs5 && g.canGet);
   const onPS5 = GAMES.filter(g => g.onPs5);
-  let h = shelf("On the way", moving) + shelf("Recently added", recent) + shelf("Not on your PS5 yet", notOn, notOn.length + " games") + shelf("Already on your PS5", onPS5) + shelf("Everything", GAMES, GAMES.length + " games");
+  let h = shelf("Downloads", moving) + shelf("Recently added", recent) + shelf("Not on your PS5 yet", notOn, notOn.length + " games") + shelf("Already on your PS5", onPS5) + shelf("Everything", GAMES, GAMES.length + " games");
   if (!GAMES.length) h = `<p class="empty">No games in Loadout yet. Pick your games folder in Loadout on the PC.</p>`;
   const rows = [...document.querySelectorAll(".row")].map(r => r.scrollLeft);
   $("#shelves").innerHTML = h;
@@ -223,7 +224,7 @@ function renderActivity() {
   const lane = (l, cls, idle) => `<div class="lane"><div class="what">${esc(l.busy && l.what ? l.what : idle)}</div><div class="track ${cls}"><i style="width:${l.busy ? l.pct / 10 : 0}%"></i></div><div class="sub">${esc([l.busy && l.total ? `${l.done} of ${l.total}` : "", l.busy ? speed(l.speed) : "", l.busy && l.eta ? dur(l.eta) + " left" : ""].filter(Boolean).join(" · "))}</div></div>`;
   const on = s.build.busy || s.ps5.busy;
   $("#activity").hidden = !on;
-  if (on) $("#activity").innerHTML = lane(s.build, "", "PC is idle") + lane(s.ps5, "ps5", "Nothing sending");
+  if (on) $("#activity").innerHTML = lane(s.build, "", "Nothing to prepare") + lane(s.ps5, "ps5", "No downloads right now");
 }
 
 // ---------- game page ----------
@@ -244,14 +245,14 @@ function closeGame() { const k = OPEN; OPEN = null; $("#detail").hidden = true; 
 function renderDetail() {
   const g = byKey(OPEN); if (!g) return closeGame();
   const p = progOf(g);
-  $("#dWhere").textContent = g.onPs5 ? "On your PS5: " + g.onPs5 : g.ready ? "Built and ready to send." : "Loadout will build it on the PC first, then send it.";
+  $("#dWhere").textContent = g.onPs5 ? "On your PS5: " + g.onPs5 : g.ready ? "Ready to download." : "Your PC will prepare it first, then it downloads.";
   const drives = (STATUS && STATUS.drives) || [];
   const keep = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.drive : null;
   $("#dDrives").innerHTML = drives.map(d => `<button class="drive${d.root === DRIVE ? " on" : ""}" data-drive="${esc(d.root)}">${esc(d.short || d.label)}<small>${d.free >= 0 ? size(d.free) + " free" : esc(d.label)}</small></button>`).join("");
   if (keep) document.querySelector(`.drive[data-drive="${CSS.escape(keep)}"]`)?.focus();
   const b = busy(p);
   $("#dGet").disabled = !g.canGet || b;
-  $("#dGet").textContent = b ? stateWord[p.state] + "…" : g.onPs5 ? "Send again" : "Send to PS5";
+  $("#dGet").textContent = b ? stateWord[p.state] + "…" : g.onPs5 ? "Download again" : "Download";
   $("#dProg").hidden = !b && p.state !== "sent" && p.state !== "failed";
   $("#dProgLbl").textContent = stateWord[p.state] || "";
   $("#dProgBar").style.width = (p.state === "sent" ? 100 : (p.pct || 0) / 10) + "%";
@@ -266,7 +267,7 @@ $("#dGet").onclick = async () => {
   $("#dGet").disabled = true;
   try {
     const d = await api("/s/get", { Key: g.key, Drive: DRIVE });
-    $("#dMsg").textContent = (d.data && d.data.msg) || "On its way."; $("#dMsg").className = "msg";
+    $("#dMsg").textContent = (d.data && d.data.msg) || "Download started."; $("#dMsg").className = "msg";
     await refresh();
   } catch (err) { if (err.message !== "pair") { $("#dMsg").textContent = err.message; $("#dMsg").className = "msg bad"; } renderDetail(); }
 };
