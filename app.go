@@ -42,6 +42,7 @@ type Settings struct {
 	View        string            // "grid" or "list"
 	RemoveAfter bool              // move the game folder to the Recycle Bin after a verified build
 	NukeBig     bool              // a folder too big for the Recycle Bin is deleted for good without asking
+	RomFolder   string            `json:",omitempty"` // the ROM library the PS5 app downloads from
 	EmuDirs     map[string]string `json:",omitempty"` // emulator folder name -> its games folder, for apps Loadout does not know
 	AutoDir     string            `json:",omitempty"` // the autoloader folder on the PS5, when it is not in a usual place
 	MoveDLC     *bool             // move loose DLC into its game's folder when renaming
@@ -1481,6 +1482,7 @@ func (a *App) handler() http.Handler {
 		}
 		str("pattern", &a.cfg.Pattern)
 		str("dlcPattern", &a.cfg.DLCPattern)
+		str("romFolder", &a.cfg.RomFolder)
 		str("ps5Ip", &a.cfg.PS5IP)
 		oldIP, oldPort := a.cfg.PS5IP, a.cfg.PS5Port
 		if v, ok := b["ps5Dir"]; ok {

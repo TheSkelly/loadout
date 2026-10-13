@@ -46,6 +46,8 @@ async function call(url, options = {}) {
     throw error;
   }
   if (!response.ok) throw new Error(data.error || `Loadout answered ${response.status}`);
+  // actions answer 200 with an error when the PC can't do them
+  if (data && typeof data.error === 'string' && data.error) throw new Error(data.error);
   return data;
 }
 
@@ -106,6 +108,12 @@ export const api = {
   games: () => call(`${base}/s/games`, {maxBytes: 4 * 1024 * 1024}),
   status: () => call(`${base}/s/status`),
   download: (key, drive) => call(`${base}/s/get`, {body: {Key: key, Drive: drive}}),
+  dlcInstall: (game, file) => call(`${base}/s/dlc/install`, {body: {Game: game, File: file}}),
+  saves: id => call(`${base}/s/saves?id=${encodeURIComponent(id)}`),
+  saveBackup: (id, name) => call(`${base}/s/saves/backup`, {body: {ID: id, Name: name}}),
+  saveRestore: backup => call(`${base}/s/saves/restore`, {body: {Backup: backup}}),
+  roms: () => call(`${base}/s/roms`, {maxBytes: 4 * 1024 * 1024}),
+  romGet: key => call(`${base}/s/roms/get`, {body: {Key: key}}),
 };
 
 // art is a picture URL; pictures can't carry headers, so the token rides along.

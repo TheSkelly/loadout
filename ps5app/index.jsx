@@ -1,11 +1,14 @@
 // Loadout for PS5: browse the games in Loadout on your PC and download them
 // to this console. The PC does the work (it builds the image if needed and
-// sends it); this app picks the game and shows the progress.
+// sends it); this app picks the game and shows the progress. It also installs
+// DLC packages, backs up and restores saves, and downloads games from the
+// PC's ROM library to the emulators on this PS5.
 //
 // Built with PS5 React (GPL-3.0-or-later); see NOTICE in the app folder.
 import {memo, useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {AppRegistry, View, Text, Image, ScrollView, VirtualList, FocusScope, useIsFocused, useController} from '@ps5-react/core';
 import {loadConfig, connect, api, art} from './api.js';
+import logo from './assets/logo.png';
 
 const T = 'font-inter text-text';
 const POLL_BUSY = 1500, POLL_IDLE = 5000, GAMES_EVERY = 60000;
@@ -16,27 +19,34 @@ const BACKDROP_WAIT = 350;
 const WORD = {queued: 'Queued', building: 'Preparing on PC', waiting: 'Waiting to download', sending: 'Downloading', sent: 'Downloaded', failed: 'Download failed'};
 const busy = p => !!p && !!p.state && p.state !== 'sent' && p.state !== 'failed';
 
-const size = b => !(b > 0) ? '' : b >= 1e12 ? `${(b / 1e12).toFixed(2)} TB` : b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${Math.round(b / 1e6)} MB`;
+const size = b => !(b > 0) ? '' : b >= 1e12 ? `${(b / 1e12).toFixed(2)} TB` : b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : b >= 1e6 ? `${Math.round(b / 1e6)} MB` : `${Math.max(1, Math.round(b / 1e3))} KB`;
 const speed = b => b > 0 ? `${Math.round(b / 1e6)} MB/s` : '';
 const dur = s => !(s > 0) ? '' : s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round(s % 3600 / 60)} min` : s >= 60 ? `${Math.round(s / 60)} min` : `${Math.round(s)} s`;
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 // firstSeen comes as "Oct 1, 2026"; a number sorts it
 const seen = s => {
   const m = /^([A-Za-z]{3})[a-z]* (\d+), (\d{4})/.exec(s || '');
   return m ? Number(m[3]) * 10000 + (MONTHS.indexOf(m[1].toLowerCase()) + 1) * 100 + Number(m[2]) : 0;
+};
+const when = iso => {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const h = d.getHours(), m = d.getMinutes();
+  return `${MON[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}  ${h % 12 || 12}:${m < 10 ? '0' : ''}${m} ${h < 12 ? 'AM' : 'PM'}`;
 };
 const byName = (a, b) => a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1;
 
 // ---------- small pieces ----------
 
 // class names are compiled at build time, so colors picked at run time go in style
-const C = {manila: '#E9C46A', mint: '#5BC8A0', coral: '#EF6F6C', sky: '#59B8F0', muted: '#8C9AB3'};
+const C = {accent: '#4B9CD3', royal: '#2F5BD8', mint: '#5BC8A0', coral: '#EF6F6C', sky: '#7CC4F5', muted: '#8FA3C4'};
 
 // tiles are square: PS5 icons are 512 x 512
 const TILE = 176, NAME_H = 21, TILE_H = TILE + 8 + NAME_H;
 
 // width is in logical pixels: the bar's fill is sized from it
-function Bar({pct, width, color = C.manila}) {
+function Bar({pct, width, color = C.accent}) {
   const fill = Math.round(width * Math.max(0, Math.min(100, pct)) / 100);
   return (
     <View className="h-[6px] rounded-full bg-line overflow-hidden" style={{width}}>
@@ -47,7 +57,7 @@ function Bar({pct, width, color = C.manila}) {
 
 // what a game is doing, for its badge and the spotlight
 function stateOf(game, prog) {
-  if (busy(prog)) return {label: WORD[prog.state] || prog.state, color: C.manila};
+  if (busy(prog)) return {label: WORD[prog.state] || prog.state, color: C.accent};
   if (prog && prog.state === 'failed') return {label: 'Download failed', color: C.coral};
   if (game.onPs5) return {label: 'On your PS5', color: C.sky};
   if (game.ready) return {label: 'Ready to download', color: C.mint};
@@ -57,7 +67,7 @@ function stateOf(game, prog) {
 
 function Badge({game, prog}) {
   let label = '', color = C.mint;
-  if (busy(prog)) { label = WORD[prog.state] || prog.state; color = C.manila; }
+  if (busy(prog)) { label = WORD[prog.state] || prog.state; color = C.accent; }
   else if (prog && prog.state === 'failed') { label = 'Failed'; color = C.coral; }
   else if (game.onPs5) { label = 'Installed'; color = C.sky; }
   if (!label) return null;
@@ -74,7 +84,7 @@ function TileArt({game, prog}) {
   const cover = art(game.cover, 'cover');
   return (
     <View focused={focused} className="w-[176px] h-[176px] rounded-2xl bg-raised border-[3px] border-transparent overflow-hidden
-      transition focused:border-text focused:scale-105">
+      transition focused:border-accent focused:scale-105">
       {cover
         ? <Image source={{uri: cover}} resizeMode="cover" className="w-[170px] h-[170px] rounded-xl bg-raised" />
         : <View className="w-[170px] h-[170px] items-center justify-center p-[14px]"><Text className={`${T} text-base text-center line-clamp-4`}>{game.name}</Text></View>}
@@ -89,27 +99,35 @@ function TileName({name}) {
   return <Text focused={focused} className="font-inter text-sm text-muted focused:text-text truncate w-[176px]">{name}</Text>;
 }
 
-const Tile = memo(function Tile({game, prog, onOpen, onSpot}) {
+// `end` is set on a rail's last tile: Right stops there instead of dropping to the next rail
+const Tile = memo(function Tile({game, prog, onOpen, onSpot, end}) {
   return (
-    <View onPress={() => onOpen(game.key)} onFocus={() => onSpot(game.key)} className="w-[176px] gap-[8px]">
+    <View onPress={() => onOpen(game.key)} onFocus={() => onSpot(game.key)} focusKey={end} nextFocusRight={end} className="w-[176px] gap-[8px]">
       <TileArt game={game} prog={prog} />
       <TileName name={game.name} />
     </View>
   );
 });
 
+function Heading({title, note, pad = 48}) {
+  return (
+    <View className="flex-row items-end gap-[12px]" style={{paddingLeft: pad, paddingRight: pad}}>
+      <Text className={`${T} text-lg font-bold`}>{title}</Text>
+      {note ? <Text className="font-inter text-sm text-faint">{note}</Text> : null}
+    </View>
+  );
+}
+
 // a rail of tiles; the ScrollView itself is the row, so the row overflows it and scrolls
-const Shelf = memo(function Shelf({title, note, games, progress, onOpen, onSpot}) {
+const Shelf = memo(function Shelf({id, title, note, games, progress, onOpen, onSpot}) {
   if (!games.length) return null;
+  const last = games.length - 1;
   return (
     <View scrollAnchor className="gap-[4px] pt-[16px]">
-      <View className="flex-row items-end gap-[12px] px-[48px]">
-        <Text className={`${T} text-lg font-bold`}>{title}</Text>
-        {note ? <Text className="font-inter text-sm text-faint">{note}</Text> : null}
-      </View>
+      <Heading title={title} note={note} />
       <ScrollView horizontal className="w-screen h-[235px] flex-row items-start gap-[22px] py-[12px]">
         <View className="w-[26px] h-[1px]" />
-        {games.map(g => <Tile key={g.key} game={g} prog={progress[g.key]} onOpen={onOpen} onSpot={onSpot} />)}
+        {games.map((g, i) => <Tile key={g.key} game={g} prog={progress[g.key]} onOpen={onOpen} onSpot={onSpot} end={i === last ? `end:${id}` : undefined} />)}
         <View className="w-[26px] h-[1px]" />
       </ScrollView>
     </View>
@@ -123,143 +141,54 @@ function Activity({status}) {
   return (
     <View className="flex-row items-center gap-[12px] px-[16px] py-[7px] rounded-full bg-surface/90 border border-line">
       <View className="gap-[1px]">
-        <Text className="font-inter text-xs text-text truncate w-[260px]">{lane.what || 'Working…'}</Text>
-        {sub ? <Text className="font-inter text-xs text-muted truncate w-[260px]">{sub}</Text> : null}
+        <Text className="font-inter text-xs text-text truncate w-[240px]">{lane.what || 'Working…'}</Text>
+        {sub ? <Text className="font-inter text-xs text-muted truncate w-[240px]">{sub}</Text> : null}
       </View>
-      <Bar pct={lane.pct / 10} width={110} color={status.ps5.busy ? C.sky : C.manila} />
+      <Bar pct={lane.pct / 10} width={100} color={status.ps5.busy ? C.sky : C.accent} />
     </View>
   );
 }
 
-function Logo() {
-  return (
-    <View className="flex-row items-center gap-[12px]">
-      <View className="w-[30px] h-[30px] rounded-lg bg-manila items-center justify-center">
-        <Text className="font-inter text-base font-bold text-ink">L</Text>
-      </View>
-      <Text className={`${T} text-xl font-bold`}>Loadout</Text>
+function Logo({big}) {
+  return big ? (
+    <View className="items-center gap-[10px]">
+      <Image source={logo} resizeMode="contain" className="w-[128px] h-[128px]" />
+      <Text className="font-inter text-[30px] leading-[36px] font-bold tracking-widest text-accent">LOADOUT</Text>
+    </View>
+  ) : (
+    <View className="flex-row items-center gap-[10px]">
+      <Image source={logo} resizeMode="contain" className="w-[40px] h-[40px]" />
+      <Text className="font-inter text-xl font-bold tracking-wider text-accent">LOADOUT</Text>
     </View>
   );
 }
 
-// ---------- screens ----------
-
-function Message({title, body, action, onAction}) {
-  return (
-    <FocusScope autoFocus>
-      <View className="w-screen h-screen bg-ink items-center justify-center gap-[16px] px-[160px]">
-        <Logo />
-        <Text className={`${T} text-title font-bold pt-[18px]`}>{title}</Text>
-        <Text className="font-inter text-base text-muted text-center">{body}</Text>
-        {action ? (
-          <View onPress={onAction} className="mt-[12px] px-[28px] py-[12px] rounded-xl bg-manila border-[3px] border-transparent focused:border-text">
-            <Text className="font-inter text-base font-bold text-ink">{action}</Text>
-          </View>
-        ) : null}
-      </View>
-    </FocusScope>
-  );
-}
-
-// the top of the home screen: the focused game's art and what it is
-
-function Backdrop({hero}) {
-  const [shown, setShown] = useState(hero);
-  useEffect(() => {
-    const t = setTimeout(() => setShown(hero), BACKDROP_WAIT);
-    return () => clearTimeout(t);
-  }, [hero]);
-  const uri = art(shown, 'hero');
-  return (
-    <View className="absolute left-0 top-0 w-screen h-[330px] overflow-hidden">
-      {uri ? <Image key={uri} source={{uri}} resizeMode="cover" className="absolute right-0 top-0 w-[900px] h-[330px]" /> : null}
-      <View className="absolute left-0 top-0 w-[900px] h-[330px] bg-gradient-to-r from-ink via-ink/85 to-transparent" />
-      <View className="absolute left-0 bottom-0 w-screen h-[120px] bg-gradient-to-t from-ink to-transparent" />
-    </View>
-  );
-}
-
-function Spotlight({game, prog}) {
-  if (!game) return null;
-  const st = stateOf(game, prog);
-  const meta = [game.platform, size(game.size), (game.genres || []).slice(0, 2).join(', '), game.rating ? `★ ${game.rating.toFixed(1)}` : ''].filter(Boolean).join('   ·   ');
-  return (
-    <View className="w-[680px] px-[48px] pt-[18px] gap-[8px]">
-      <Text className={`${T} text-[38px] leading-[46px] font-bold line-clamp-2`}>{game.name}</Text>
-      <Text className="font-inter text-sm text-muted line-clamp-1">{meta}</Text>
-      {st ? <Text className="font-inter text-sm" style={{color: st.color}}>{st.label}</Text> : null}
-      {game.desc ? <Text className="font-inter text-sm text-text/80 line-clamp-2 pt-[2px]">{game.desc}</Text> : null}
-    </View>
-  );
-}
-
-function Home({games, status, progress, onOpen}) {
-  const [spot, setSpot] = useState(null);
-  const shelves = useMemo(() => {
-    const moving = games.filter(g => busy(progress[g.key]));
-    const recent = games.filter(g => seen(g.firstSeen)).sort((a, b) => seen(b.firstSeen) - seen(a.firstSeen) || byName(a, b)).slice(0, 15);
-    const notOn = games.filter(g => !g.onPs5 && g.canGet);
-    const onPs5 = games.filter(g => g.onPs5);
-    // the genres with the most games get rails of their own
-    const count = {};
-    for (const g of games) for (const x of g.genres || []) count[x] = (count[x] || 0) + 1;
-    const genres = Object.keys(count).filter(x => count[x] >= 4).sort((a, b) => count[b] - count[a]).slice(0, 3)
-      .map(x => ({name: x, games: games.filter(g => (g.genres || []).includes(x))}));
-    return {moving, recent, notOn, onPs5, genres};
-  }, [games, progress]);
-  const onSpot = useCallback(key => setSpot(key), []);
-  const renderItem = useCallback(({item}) => <Tile game={item} prog={progress[item.key]} onOpen={onOpen} onSpot={onSpot} />, [progress, onOpen, onSpot]);
-  const game = games.find(g => g.key === spot) || shelves.recent[0] || games[0];
-  return (
-    <View className="w-screen h-screen bg-ink">
-      <Backdrop hero={game && game.hero} />
-      <View className="h-[330px]">
-        <View className="flex-row items-center px-[48px] pt-[26px] gap-[16px]">
-          <Logo />
-          <View className="flex-1" />
-          <Activity status={status} />
-          {status && status.pc ? <Text className="font-inter text-sm text-muted">{status.pc}</Text> : null}
-        </View>
-        <Spotlight game={game} prog={game && progress[game.key]} />
-      </View>
-      <FocusScope autoFocus>
-        <ScrollView className="flex-1 bg-ink">
-          <Shelf title="Downloading" games={shelves.moving} progress={progress} onOpen={onOpen} onSpot={onSpot} />
-          <Shelf title="New in your library" games={shelves.recent} progress={progress} onOpen={onOpen} onSpot={onSpot} />
-          <Shelf title="Ready for your PS5" note={`${shelves.notOn.length} games`} games={shelves.notOn} progress={progress} onOpen={onOpen} onSpot={onSpot} />
-          {shelves.genres.map(x => <Shelf key={x.name} title={x.name} games={x.games} progress={progress} onOpen={onOpen} onSpot={onSpot} />)}
-          <Shelf title="On your PS5" games={shelves.onPs5} progress={progress} onOpen={onOpen} onSpot={onSpot} />
-          <View scrollAnchor className="gap-[14px] pt-[16px] pb-[48px]">
-            <View className="flex-row items-end gap-[12px] px-[48px]">
-              <Text className={`${T} text-lg font-bold`}>All games</Text>
-              <Text className="font-inter text-sm text-faint">{`${games.length}, A to Z`}</Text>
-            </View>
-            <View className="px-[48px] pt-[6px]">
-              <VirtualList data={games} keyExtractor={g => g.key} renderItem={renderItem}
-                numColumns={6} itemHeight={TILE_H} rowGap={26} columnGap={25} />
-            </View>
-          </View>
-          {!games.length ? <Text className="font-inter text-base text-muted px-[48px] pt-[30px]">No games in Loadout yet. Pick your games folder in Loadout on the PC.</Text> : null}
-        </ScrollView>
-      </FocusScope>
-    </View>
-  );
-}
-
-function Button({label, onPress, primary, disabled}) {
+function Button({label, onPress, primary, disabled, small}) {
   if (disabled) {
     return (
-      <View focusable className="px-[34px] py-[13px] rounded-xl bg-raised border-[3px] border-transparent focused:border-text">
-        <Text className="font-inter text-base text-muted">{label}</Text>
+      <View focusable className={small ? 'px-[20px] py-[7px] rounded-lg bg-raised border-[3px] border-transparent focused:border-text'
+        : 'px-[34px] py-[13px] rounded-xl bg-raised border-[3px] border-transparent focused:border-text'}>
+        <Text className={small ? 'font-inter text-sm text-muted' : 'font-inter text-base text-muted'}>{label}</Text>
+      </View>
+    );
+  }
+  if (small) {
+    return primary ? (
+      <View onPress={onPress} className="px-[20px] py-[7px] rounded-lg bg-accent border-[3px] border-transparent focused:border-text">
+        <Text className="font-inter text-sm font-bold text-ink">{label}</Text>
+      </View>
+    ) : (
+      <View onPress={onPress} className="px-[20px] py-[7px] rounded-lg bg-raised border-[3px] border-transparent focused:border-accent">
+        <Text className="font-inter text-sm text-text">{label}</Text>
       </View>
     );
   }
   return primary ? (
-    <View onPress={onPress} className="px-[40px] py-[13px] rounded-xl bg-manila border-[3px] border-transparent transition focused:border-text focused:scale-105">
+    <View onPress={onPress} className="px-[40px] py-[13px] rounded-xl bg-accent border-[3px] border-transparent transition focused:border-text focused:scale-105">
       <Text className="font-inter text-base font-bold text-ink">{label}</Text>
     </View>
   ) : (
-    <View onPress={onPress} className="px-[34px] py-[13px] rounded-xl bg-raised/90 border-[3px] border-transparent transition focused:border-text focused:scale-105">
+    <View onPress={onPress} className="px-[34px] py-[13px] rounded-xl bg-raised/90 border-[3px] border-transparent transition focused:border-accent focused:scale-105">
       <Text className="font-inter text-base text-text">{label}</Text>
     </View>
   );
@@ -273,10 +202,280 @@ function Chip({children}) {
   );
 }
 
+// a question over the screen; Circle cancels
+function Confirm({title, body, yes, onYes, onClose}) {
+  return (
+    <FocusScope autoFocus trap onBack={() => { onClose(); return true; }}>
+      <View className="absolute inset-0 w-screen h-screen bg-black/70 items-center justify-center">
+        <View className="w-[620px] p-[32px] gap-[16px] rounded-3xl bg-surface border-2 border-royal">
+          <Text className={`${T} text-xl font-bold`}>{title}</Text>
+          {body ? <Text className="font-inter text-base text-muted">{body}</Text> : null}
+          <View className="flex-row gap-[14px] pt-[8px]">
+            <Button primary label={yes} onPress={() => { onClose(); onYes(); }} />
+            <Button label="Cancel" onPress={onClose} />
+          </View>
+        </View>
+      </View>
+    </FocusScope>
+  );
+}
+
+// ---------- screens ----------
+
+function Message({title, body, action, onAction}) {
+  return (
+    <FocusScope autoFocus>
+      <View className="w-screen h-screen bg-ink items-center justify-center gap-[16px] px-[160px]">
+        <View className="absolute inset-0 bg-gradient-to-b from-ink2 via-ink to-black" />
+        <Logo big />
+        <Text className={`${T} text-title font-bold pt-[18px]`}>{title}</Text>
+        <Text className="font-inter text-base text-muted text-center">{body}</Text>
+        {action ? <View className="pt-[12px]"><Button primary label={action} onPress={onAction} /></View> : null}
+      </View>
+    </FocusScope>
+  );
+}
+
+// the top of the home screen: the focused game's art and what it is
+function Backdrop({hero}) {
+  const [shown, setShown] = useState(hero);
+  useEffect(() => {
+    const t = setTimeout(() => setShown(hero), BACKDROP_WAIT);
+    return () => clearTimeout(t);
+  }, [hero]);
+  const uri = art(shown, 'hero');
+  return (
+    <View className="absolute left-0 top-0 w-screen h-[330px] overflow-hidden">
+      <View className="absolute inset-0 bg-gradient-to-br from-ink2 via-ink to-black" />
+      {uri ? <Image key={uri} source={{uri}} resizeMode="cover" className="absolute right-0 top-0 w-[900px] h-[330px]" /> : null}
+      <View className="absolute left-0 top-0 w-[900px] h-[330px] bg-gradient-to-r from-ink via-ink/85 to-transparent" />
+      <View className="absolute left-0 bottom-0 w-screen h-[120px] bg-gradient-to-t from-ink to-transparent" />
+    </View>
+  );
+}
+
+function Spotlight({game, prog}) {
+  if (!game) return null;
+  const st = stateOf(game, prog);
+  const meta = [game.platform, size(game.size), (game.genres || []).slice(0, 2).join(', '), game.rating ? `★ ${game.rating.toFixed(1)}` : '',
+    game.dlc && game.dlc.length ? `${game.dlc.length} DLC` : ''].filter(Boolean).join('   ·   ');
+  return (
+    <View className="w-[680px] px-[48px] pt-[12px] gap-[8px]">
+      <Text className={`${T} text-[38px] leading-[46px] font-bold line-clamp-2`}>{game.name}</Text>
+      <Text className="font-inter text-sm text-muted line-clamp-1">{meta}</Text>
+      {st ? <Text className="font-inter text-sm" style={{color: st.color}}>{st.label}</Text> : null}
+      {game.desc ? <Text className="font-inter text-sm text-text/80 line-clamp-2 pt-[2px]">{game.desc}</Text> : null}
+    </View>
+  );
+}
+
+function Tab({label, on, onPress}) {
+  return on ? (
+    <View onPress={onPress} className="px-[18px] py-[6px] rounded-full bg-accent border-2 border-transparent focused:border-text">
+      <Text className="font-inter text-sm font-bold text-ink">{label}</Text>
+    </View>
+  ) : (
+    <View onPress={onPress} className="px-[18px] py-[6px] rounded-full bg-surface/80 border-2 border-transparent focused:border-accent">
+      <Text className="font-inter text-sm text-text">{label}</Text>
+    </View>
+  );
+}
+
+function TopBar({tab, setTab, status}) {
+  return (
+    <View className="flex-row items-center px-[48px] pt-[22px] gap-[16px]">
+      <Logo />
+      <FocusScope>
+        <View className="flex-row gap-[10px] pl-[18px]">
+          <Tab label="Games" on={tab === 'games'} onPress={() => setTab('games')} />
+          <Tab label="Emulators" on={tab === 'emu'} onPress={() => setTab('emu')} />
+        </View>
+      </FocusScope>
+      <Text className="font-inter text-xs text-faint">L1 / R1</Text>
+      <View className="flex-1" />
+      <Activity status={status} />
+      {status && status.pc ? <Text className="font-inter text-sm text-muted">{status.pc}</Text> : null}
+    </View>
+  );
+}
+
+function Games({games, progress, onOpen}) {
+  const [spot, setSpot] = useState(null);
+  const shelves = useMemo(() => {
+    const moving = games.filter(g => busy(progress[g.key]));
+    const recent = games.filter(g => seen(g.firstSeen)).sort((a, b) => seen(b.firstSeen) - seen(a.firstSeen) || byName(a, b)).slice(0, 15);
+    const notOn = games.filter(g => !g.onPs5 && g.canGet);
+    const onPs5 = games.filter(g => g.onPs5);
+    const dlc = games.filter(g => g.dlc && g.dlc.some(d => d.pkg));
+    // the genres with the most games get rails of their own
+    const count = {};
+    for (const g of games) for (const x of g.genres || []) count[x] = (count[x] || 0) + 1;
+    const genres = Object.keys(count).filter(x => count[x] >= 4).sort((a, b) => count[b] - count[a]).slice(0, 3)
+      .map(x => ({name: x, games: games.filter(g => (g.genres || []).includes(x))}));
+    return {moving, recent, notOn, onPs5, dlc, genres};
+  }, [games, progress]);
+  const onSpot = useCallback(key => { setSpot(key); tellSpot(key); }, []);
+  const renderItem = useCallback(({item}) => <Tile game={item} prog={progress[item.key]} onOpen={onOpen} onSpot={onSpot} />, [progress, onOpen, onSpot]);
+  const game = games.find(g => g.key === spot) || shelves.recent[0] || games[0];
+  return (
+    <View className="flex-1">
+      <View className="h-[258px]">
+        <Spotlight game={game} prog={game && progress[game.key]} />
+      </View>
+      <FocusScope autoFocus>
+        <ScrollView className="flex-1 bg-ink">
+          <Shelf id="moving" title="Downloading" games={shelves.moving} progress={progress} onOpen={onOpen} onSpot={onSpot} />
+          <Shelf id="recent" title="New in your library" games={shelves.recent} progress={progress} onOpen={onOpen} onSpot={onSpot} />
+          <Shelf id="noton" title="Ready for your PS5" note={`${shelves.notOn.length} games`} games={shelves.notOn} progress={progress} onOpen={onOpen} onSpot={onSpot} />
+          <Shelf id="dlc" title="DLC to install" note="open a game to install its DLC" games={shelves.dlc} progress={progress} onOpen={onOpen} onSpot={onSpot} />
+          {shelves.genres.map(x => <Shelf key={x.name} id={`g:${x.name}`} title={x.name} games={x.games} progress={progress} onOpen={onOpen} onSpot={onSpot} />)}
+          <Shelf id="onps5" title="On your PS5" games={shelves.onPs5} progress={progress} onOpen={onOpen} onSpot={onSpot} />
+          <View scrollAnchor className="gap-[14px] pt-[16px] pb-[48px]">
+            <Heading title="All games" note={`${games.length}, A to Z`} />
+            <View className="px-[48px] pt-[6px]">
+              <VirtualList data={games} keyExtractor={g => g.key} renderItem={renderItem}
+                numColumns={6} itemHeight={TILE_H} rowGap={26} columnGap={25} />
+            </View>
+          </View>
+          {!games.length ? <Text className="font-inter text-base text-muted px-[48px] pt-[30px]">No games in Loadout yet. Pick your games folder in Loadout on the PC.</Text> : null}
+        </ScrollView>
+      </FocusScope>
+    </View>
+  );
+}
+
+// ---------- emulators: the PC's ROM library ----------
+
+// a ROM has no art: a tile in the system's own shade of blue, with its name
+const SHADES = [['#2F5BD8', '#0A1640'], ['#4B9CD3', '#0B2238'], ['#3A47B8', '#0D0F33'], ['#2B7FB8', '#08192B'], ['#5468E8', '#111640']];
+function shade(system) {
+  let h = 0;
+  for (const ch of system) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return SHADES[h % SHADES.length];
+}
+
+function RomArt({rom, prog}) {
+  const focused = useIsFocused();
+  const [from, to] = shade(rom.system);
+  return (
+    <View focused={focused} className="w-[176px] h-[176px] rounded-2xl border-[3px] border-transparent overflow-hidden transition focused:border-accent focused:scale-105"
+      style={{backgroundGradient: {type: 'linear', angle: 135, stops: [{color: from, offset: 0}, {color: to, offset: 1}]}}}>
+      <View className="flex-1 p-[14px] justify-between">
+        <Text className="font-inter text-xs font-bold tracking-widest text-text/70">{rom.system.toUpperCase()}</Text>
+        <Text className={`${T} text-base font-bold line-clamp-4`}>{rom.name}</Text>
+        <Text className="font-inter text-xs text-text/70">{rom.isDir ? 'Folder' : (rom.file.match(/\.([^.]+)$/) || ['', ''])[1].toUpperCase()}</Text>
+      </View>
+      {busy(prog) ? <View className="absolute left-[10px] top-[10px] px-[10px] py-[3px] rounded-full bg-ink/90"><Text className="font-inter text-xs text-accent">{WORD[prog.state] || 'Downloading'}</Text></View> : null}
+      {prog && prog.state === 'sent' ? <View className="absolute right-[10px] top-[10px] px-[10px] py-[3px] rounded-full bg-ink/90"><Text className="font-inter text-xs text-mint">On PS5</Text></View> : null}
+    </View>
+  );
+}
+
+const RomTile = memo(function RomTile({rom, prog, onPick, onSpot, end}) {
+  return (
+    <View onPress={() => onPick(rom)} onFocus={() => onSpot(rom.key)} focusKey={end} nextFocusRight={end} className="w-[176px] gap-[8px]">
+      <RomArt rom={rom} prog={prog} />
+      <TileName name={rom.name} />
+    </View>
+  );
+});
+
+function Emulators({progress, onPick}) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [spot, setSpot] = useState(null);
+  useEffect(() => {
+    let stop = false;
+    api.roms().then(d => { if (!stop) setData(d); }).catch(err => { if (!stop) setError(err.message); });
+    return () => { stop = true; };
+  }, []);
+  const onSpot = useCallback(key => setSpot(key), []);
+  const systems = (data && data.systems) || [];
+  const all = systems.flatMap(s => s.games);
+  const rom = all.find(r => r.key === spot) || all[0];
+  const prog = rom && progress[`rom:${rom.key}`];
+  let empty = '';
+  if (error) empty = error;
+  else if (!data) empty = 'Reading your ROM library…';
+  else if (!data.folder) empty = 'No ROM library yet. In Loadout on the PC, open Emulators and click ROM library, then pick the folder with your ROMs: one folder per system inside it (Switch for ProsperoEden; anything else goes to RetroArch).';
+  else if (!systems.length) empty = `No games in ${data.folder} yet. Put each system's games in a folder of its own inside it.`;
+  return (
+    <View className="flex-1">
+      <View className="h-[258px] px-[48px] pt-[12px] gap-[8px] w-[760px]">
+        {rom ? <Text className={`${T} text-[38px] leading-[46px] font-bold line-clamp-2`}>{rom.name}</Text> : null}
+        {rom ? <Text className="font-inter text-sm text-muted">{[rom.system, size(rom.size), rom.file].filter(Boolean).join('   ·   ')}</Text> : null}
+        {rom ? <Text className="font-inter text-sm text-accent">{busy(prog) ? `${WORD[prog.state] || 'Downloading'}${prog.pct ? ` · ${Math.floor(prog.pct / 10)}%` : ''}` : prog && prog.state === 'sent' ? `Downloaded to ${rom.emu}` : `Downloads to ${rom.emu} on this PS5`}</Text> : null}
+        {!rom ? <Text className={`${T} text-[38px] leading-[46px] font-bold`}>Emulators</Text> : null}
+        {!rom ? <Text className="font-inter text-sm text-muted">Games from the ROM library on your PC, sent straight to the right emulator.</Text> : null}
+      </View>
+      {empty ? (
+        <FocusScope autoFocus>
+          <View className="px-[48px] pt-[10px] w-[900px] gap-[16px]">
+            <Text className="font-inter text-base text-muted">{empty}</Text>
+            <View focusable className="w-[1px] h-[1px]" />
+          </View>
+        </FocusScope>
+      ) : (
+        <FocusScope autoFocus>
+          <ScrollView className="flex-1 bg-ink">
+            {systems.map(s => {
+              const last = s.games.length - 1;
+              return (
+                <View key={s.name} scrollAnchor className="gap-[4px] pt-[16px]">
+                  <Heading title={s.name} note={`${s.games.length} · to ${s.emu}`} />
+                  <ScrollView horizontal className="w-screen h-[235px] flex-row items-start gap-[22px] py-[12px]">
+                    <View className="w-[26px] h-[1px]" />
+                    {s.games.map((r, i) => <RomTile key={r.key} rom={r} prog={progress[`rom:${r.key}`]} onPick={onPick} onSpot={onSpot} end={i === last ? `end:rom:${s.name}` : undefined} />)}
+                    <View className="w-[26px] h-[1px]" />
+                  </ScrollView>
+                </View>
+              );
+            })}
+            <View className="h-[40px]" />
+          </ScrollView>
+        </FocusScope>
+      )}
+    </View>
+  );
+}
+
+function Home({games, status, progress, onOpen, onPickRom, tab, setTab}) {
+  const flip = useCallback(action => {
+    if (action !== 'l1' && action !== 'r1') return false;
+    setTab(t => t === 'games' ? 'emu' : 'games');
+    return true;
+  }, [setTab]);
+  return (
+    <FocusScope onAction={flip}>
+      <View className="w-screen h-screen bg-ink">
+        {tab === 'games' ? <BackdropFor games={games} /> : <View className="absolute left-0 top-0 w-screen h-[330px] bg-gradient-to-br from-ink2 via-ink to-black" />}
+        <TopBar tab={tab} setTab={setTab} status={status} />
+        {tab === 'games'
+          ? <Games key="games" games={games} progress={progress} onOpen={onOpen} />
+          : <Emulators key="emu" progress={progress} onPick={onPickRom} />}
+      </View>
+    </FocusScope>
+  );
+}
+
+// the home backdrop follows the spotlight; Games reports it through this tiny store
+const spotStore = {key: null, listeners: new Set()};
+function BackdropFor({games}) {
+  const [key, setKey] = useState(spotStore.key);
+  useEffect(() => {
+    const fn = k => setKey(k);
+    spotStore.listeners.add(fn);
+    return () => spotStore.listeners.delete(fn);
+  }, []);
+  const g = games.find(x => x.key === key) || games[0];
+  return <Backdrop hero={g && g.hero} />;
+}
+const tellSpot = key => { spotStore.key = key; for (const fn of spotStore.listeners) fn(key); };
+
 function Shot({k, n}) {
   const focused = useIsFocused();
   return (
-    <View focused={focused} className="w-[352px] h-[198px] rounded-xl bg-raised border-[3px] border-transparent overflow-hidden transition focused:border-text focused:scale-105">
+    <View focused={focused} className="w-[352px] h-[198px] rounded-xl bg-raised border-[3px] border-transparent overflow-hidden transition focused:border-accent focused:scale-105">
       <Image source={{uri: art(k, `shot${n}`)}} resizeMode="cover" className="w-[346px] h-[192px] rounded-lg bg-raised" />
     </View>
   );
@@ -301,8 +500,108 @@ function Viewer({k, count, start, onClose}) {
   );
 }
 
-function Detail({game, status, prog, drive, setDrive, onBack, onDownload, message}) {
+// a row in the game page's DLC and saves lists
+function Row({title, sub, children}) {
+  return (
+    <View className="w-[1150px] flex-row items-center gap-[16px] px-[18px] py-[10px] rounded-xl bg-surface/85 border border-line">
+      <View className="flex-1 gap-[2px]">
+        <Text className={`${T} text-base truncate`}>{title}</Text>
+        {sub ? <Text className="font-inter text-xs text-muted truncate">{sub}</Text> : null}
+      </View>
+      {children}
+    </View>
+  );
+}
+
+function DLCSection({game, progress, say}) {
+  const list = game.dlc || [];
+  const [ask, setAsk] = useState(null);
+  if (!list.length) return null;
+  const install = async d => {
+    say({text: `Asking your PC to install ${d.name}…`});
+    try {
+      const r = await api.dlcInstall(game.key, d.key);
+      say({text: (r.data && r.data.msg) || 'Installing.'});
+    } catch (err) {
+      say({text: err.message, bad: true});
+    }
+  };
+  return (
+    <View scrollAnchor className="gap-[10px] pt-[26px] px-[64px]">
+      <Heading title="DLC" note={`${list.length} on your PC`} pad={0} />
+      {list.map(d => {
+        const p = progress[`dlc:${d.key}`];
+        const sub = [d.kind, size(d.size), busy(p) ? `${WORD[p.state] || 'Installing'}${p.pct ? ` ${Math.floor(p.pct / 10)}%` : ''}` : p && p.state === 'sent' ? 'Sent to the PS5: it finishes installing in its Downloads list' : p && p.state === 'failed' ? `Failed: ${p.note}` : '',
+          d.pkg ? '' : 'Only .pkg DLC installs from here'].filter(Boolean).join('   ·   ');
+        return (
+          <Row key={d.key} title={d.name} sub={sub}>
+            <Button small primary={d.pkg && !busy(p)} disabled={!d.pkg || busy(p)} label={busy(p) ? 'Installing…' : p && p.state === 'sent' ? 'Install again' : 'Install'} onPress={() => setAsk(d)} />
+          </Row>
+        );
+      })}
+      {ask ? <Confirm title={`Install ${ask.name}?`} body="Your PS5 downloads the package from your PC and installs it. etaHEN's package installer (DPI) needs to be on." yes="Install" onYes={() => install(ask)} onClose={() => setAsk(null)} /> : null}
+    </View>
+  );
+}
+
+function SavesSection({game, progress, say}) {
+  const [data, setData] = useState(null);
+  const [ask, setAsk] = useState(null);
+  const id = game.id;
+  const load = useCallback(() => api.saves(id).then(setData).catch(() => {}), [id]);
+  // the PC reads the PS5's saves in the background; ask again until it's done
+  useEffect(() => {
+    if (!id) return undefined;
+    load();
+    const t = setInterval(load, 4000);
+    return () => clearInterval(t);
+  }, [id, load]);
+  if (!id) return null;
+  const saves = (data && data.saves) || [], backups = (data && data.backups) || [];
+  const moving = Object.keys(progress).some(k => (k.startsWith('save:') || k.startsWith('rest:')) && k.includes(id) && busy(progress[k]));
+  const backup = async () => {
+    say({text: 'Backing up your save to the PC…'});
+    try {
+      await api.saveBackup(id, game.name);
+      say({text: 'Backing up. It shows below when it’s done.'});
+    } catch (err) {
+      say({text: err.message, bad: true});
+    }
+  };
+  const restore = async b => {
+    say({text: 'Restoring the save…'});
+    try {
+      await api.saveRestore(b.id);
+      say({text: 'Restoring. Your current save is backed up first, just in case.'});
+    } catch (err) {
+      say({text: err.message, bad: true});
+    }
+  };
+  const onPs5 = !data ? 'Looking for this game’s save on your PS5…'
+    : saves.length ? saves.map(s => `${s.userName || s.user}: ${size(s.size)}`).join('   ·   ')
+      : data.busy ? 'Looking for this game’s save on your PS5…' : data.err ? `Can't read saves: ${data.err}` : 'No save for this game on your PS5';
+  return (
+    <View scrollAnchor className="gap-[10px] pt-[26px] px-[64px]">
+      <Heading title="Saves" note={backups.length ? `${backups.length} backup${backups.length === 1 ? '' : 's'} on your PC` : 'none backed up yet'} pad={0} />
+      <Row title="On your PS5" sub={onPs5}>
+        <Button small primary={!!saves.length && !moving} disabled={!saves.length || moving} label={moving ? 'Working…' : 'Back up to PC'} onPress={backup} />
+      </Row>
+      {backups.slice(0, 8).map(b => (
+        <Row key={b.id} title={when(b.when) || b.id} sub={[b.userName || b.user, size(b.size), b.auto ? `safety copy before a ${b.why || 'change'}` : ''].filter(Boolean).join('   ·   ')}>
+          <Button small disabled={moving} label="Restore" onPress={() => setAsk(b)} />
+        </Row>
+      ))}
+      {ask ? <Confirm title="Restore this save?" yes="Restore"
+        body={`It replaces the save for ${game.name} on your PS5 with the one from ${when(ask.when)}. Close the game completely first (not just suspended). Your current save is backed up to your PC first.`}
+        onYes={() => restore(ask)} onClose={() => setAsk(null)} /> : null}
+    </View>
+  );
+}
+
+function Detail({game, status, progress, drive, setDrive, onBack, onDownload, message}) {
   const [shot, setShot] = useState(-1);
+  const [note, setNote] = useState(null);
+  const prog = progress[game.key];
   const hero = art(game.hero, 'hero');
   const cover = art(game.cover, 'cover');
   const drives = (status && status.drives) || [];
@@ -313,6 +612,7 @@ function Detail({game, status, prog, drive, setDrive, onBack, onDownload, messag
   const where = game.onPs5 ? `On your PS5 · ${game.onPs5}` : st ? st.label : '';
   const label = b ? `${WORD[prog.state] || prog.state}…` : game.onPs5 ? 'Download again' : 'Download';
   const shots = game.lib ? Math.min(game.shots || 0, 6) : 0;
+  const shown = note || message;
   return (
     <FocusScope autoFocus trap onBack={() => { onBack(); return true; }}>
       <View className="w-screen h-screen bg-ink">
@@ -330,7 +630,7 @@ function Detail({game, status, prog, drive, setDrive, onBack, onDownload, messag
                 {by ? <Text className="font-inter text-base text-muted">{by}</Text> : null}
                 {game.rating ? (
                   <View className="flex-row items-end gap-[10px]">
-                    <Text className="font-inter text-base font-bold" style={{color: C.manila}}>{`★ ${game.rating.toFixed(1)}`}</Text>
+                    <Text className="font-inter text-base font-bold" style={{color: C.accent}}>{`★ ${game.rating.toFixed(1)}`}</Text>
                     {game.ratings ? <Text className="font-inter text-sm text-muted">{`${game.ratings} ratings`}</Text> : null}
                   </View>
                 ) : null}
@@ -339,7 +639,7 @@ function Detail({game, status, prog, drive, setDrive, onBack, onDownload, messag
               </View>
             </View>
             <View className="flex-row items-center gap-[16px] pt-[6px]">
-              <Button primary label={label} onPress={onDownload} disabled={b || !game.canGet} />
+              <Button primary label={label} onPress={() => { setNote(null); onDownload(); }} disabled={b || !game.canGet} />
               <Button label="Back" onPress={onBack} />
               {where ? <Text className="font-inter text-sm pl-[8px] truncate w-[620px]" style={{color: st ? st.color : C.muted}}>{where}</Text> : null}
             </View>
@@ -349,7 +649,7 @@ function Detail({game, status, prog, drive, setDrive, onBack, onDownload, messag
                 <View className="flex-row gap-[12px]">
                   {drives.map(d => (
                     <View key={d.root} onPress={() => setDrive(d.root)} selected={d.root === drive}
-                      className="px-[18px] py-[9px] rounded-xl bg-surface/90 border-[3px] border-line selected:border-sky focused:border-text">
+                      className="px-[18px] py-[9px] rounded-xl bg-surface/90 border-[3px] border-line selected:border-accent focused:border-text">
                       <Text className="font-inter text-sm text-text">{d.short || d.label}</Text>
                       <Text className="font-inter text-xs text-muted">{d.free >= 0 ? `${size(d.free)} free` : d.label}</Text>
                     </View>
@@ -360,24 +660,27 @@ function Detail({game, status, prog, drive, setDrive, onBack, onDownload, messag
             {b || (prog && prog.state) ? (
               <View className="w-[600px] gap-[6px]">
                 <Text className={`${T} text-base`}>{WORD[prog.state] || ''}</Text>
-                <Bar pct={prog.state === 'sent' ? 100 : (prog.pct || 0) / 10} width={600} color={prog.state === 'failed' ? C.coral : C.manila} />
+                <Bar pct={prog.state === 'sent' ? 100 : (prog.pct || 0) / 10} width={600} color={prog.state === 'failed' ? C.coral : C.accent} />
                 {prog.note ? <Text className="font-inter text-sm text-muted">{prog.note}</Text> : null}
               </View>
             ) : null}
-            {message ? <Text className="font-inter text-sm" style={{color: message.bad ? C.coral : C.muted}}>{message.text}</Text> : null}
+            {shown ? <Text className="font-inter text-sm" style={{color: shown.bad ? C.coral : C.sky}}>{shown.text}</Text> : null}
           </View>
+          <DLCSection game={game} progress={progress} say={setNote} />
+          <SavesSection game={game} progress={progress} say={setNote} />
           {shots ? (
-            <View scrollAnchor className="gap-[4px] pt-[28px] pb-[40px]">
-              <Text className={`${T} text-lg font-bold px-[64px]`}>Screenshots</Text>
+            <View scrollAnchor className="gap-[4px] pt-[28px]">
+              <Heading title="Screenshots" pad={64} />
               <ScrollView horizontal className="w-screen h-[230px] flex-row items-start gap-[20px] py-[12px]">
                 <View className="w-[44px] h-[1px]" />
                 {Array.from({length: shots}, (_, n) => (
-                  <View key={n} onPress={() => setShot(n)}><Shot k={game.lib} n={n} /></View>
+                  <View key={n} onPress={() => setShot(n)} focusKey={n === shots - 1 ? 'end:shots' : undefined} nextFocusRight={n === shots - 1 ? 'end:shots' : undefined}><Shot k={game.lib} n={n} /></View>
                 ))}
                 <View className="w-[44px] h-[1px]" />
               </ScrollView>
             </View>
           ) : null}
+          <View className="h-[60px]" />
         </ScrollView>
         {shot >= 0 ? <Viewer k={game.lib} count={shots} start={shot} onClose={() => setShot(-1)} /> : null}
       </View>
@@ -392,8 +695,11 @@ function App() {
   const [games, setGames] = useState([]);
   const [status, setStatus] = useState(null);
   const [open, setOpen] = useState(null);
+  const [tab, setTab] = useState('games');
+  const [rom, setRom] = useState(null);
   const [drive, setDrive] = useState('');
   const [message, setMessage] = useState(null);
+  const [romNote, setRomNote] = useState(null);
   const gamesAt = useRef(0);
   const wasBusy = useRef(new Set());
   const working = useRef(false); // the PC is building or sending: poll faster
@@ -456,6 +762,23 @@ function App() {
 
   const openGame = useCallback(key => { setMessage(null); setOpen(key); }, []);
   const back = useCallback(() => setOpen(null), []);
+  const pickRom = useCallback(r => { setRomNote(null); setRom(r); }, []);
+  // the note about a ROM download fades after a while
+  useEffect(() => {
+    if (!romNote || rom) return undefined;
+    const t = setTimeout(() => setRomNote(null), 8000);
+    return () => clearTimeout(t);
+  }, [romNote, rom]);
+
+  const refresh = async () => {
+    try {
+      const s = await api.status();
+      setStatus(s);
+      working.current = s.build.busy || s.ps5.busy;
+    } catch (err) {
+      // the next poll catches up
+    }
+  };
 
   const download = useCallback(async () => {
     const g = games.find(x => x.key === open);
@@ -464,13 +787,22 @@ function App() {
     try {
       const d = await api.download(g.key, drive);
       setMessage({text: (d.data && d.data.msg) || 'Download started.'});
-      const s = await api.status();
-      setStatus(s);
-      working.current = s.build.busy || s.ps5.busy;
+      refresh();
     } catch (err) {
       setMessage({text: err.message, bad: true});
     }
   }, [games, open, drive]);
+
+  const getRom = async r => {
+    setRomNote({text: `Asking your PC to send ${r.name}…`});
+    try {
+      const d = await api.romGet(r.key);
+      setRomNote({text: (d.data && d.data.msg) || 'Downloading.'});
+      refresh();
+    } catch (err) {
+      setRomNote({text: err.message, bad: true});
+    }
+  };
 
   if (phase.kind === 'starting') return <Message title="Welcome back" body={phase.text} />;
   if (phase.kind === 'setup') {
@@ -485,13 +817,23 @@ function App() {
   const game = open && games.find(g => g.key === open);
   return (
     <View className="w-screen h-screen bg-ink">
-      <FocusScope inert={!!game}>
-        <Home games={games} status={status} progress={progress} onOpen={openGame} />
+      <FocusScope inert={!!game || !!rom}>
+        <Home games={games} status={status} progress={progress} onOpen={openGame} onPickRom={pickRom} tab={tab} setTab={setTab} />
       </FocusScope>
       {game ? (
         <View className="absolute inset-0">
-          <Detail game={game} status={status} prog={progress[game.key]} drive={drive} setDrive={setDrive}
+          <Detail game={game} status={status} progress={progress} drive={drive} setDrive={setDrive}
             onBack={back} onDownload={download} message={message} />
+        </View>
+      ) : null}
+      {rom ? (
+        <Confirm title={`Download ${rom.name}?`} yes="Download"
+          body={`It goes to ${rom.emu} on this PS5 (${rom.system}, ${size(rom.size) || 'folder'}).${romNote ? `\n\n${romNote.text}` : ''}`}
+          onYes={() => getRom(rom)} onClose={() => setRom(null)} />
+      ) : null}
+      {romNote && !rom ? (
+        <View className="absolute bottom-[28px] left-[48px] px-[18px] py-[10px] rounded-xl bg-surface border border-line">
+          <Text className="font-inter text-sm" style={{color: romNote.bad ? C.coral : C.sky}}>{romNote.text}</Text>
         </View>
       ) : null}
     </View>

@@ -584,11 +584,11 @@ function renderEmu() {
   let bh, html;
   if (!app) {
     bh = `<span class="ps5stat">${EM.busy ? "Looking for emulators on the PS5…" : EM.loaded ? `${EM.apps.length} installed` : ""}</span><span class="grow"></span>
-      <button class="btn primary" data-emu="zip">Install from a ZIP</button><button class="btn ghost" data-emu="browse">Browse files</button><button class="btn ghost" data-emu="refresh">Refresh</button>`;
+      <button class="btn primary" data-emu="zip">Install from a ZIP</button><button class="btn ghost" data-emu="romlib" title="A folder on this PC with one folder per system. The Loadout app on the PS5 downloads games from it">ROM library</button><button class="btn ghost" data-emu="browse">Browse files</button><button class="btn ghost" data-emu="refresh">Refresh</button>`;
     if (!S.settings.PS5IP) html = `<div class="empty"><p>Add your PS5's IP address in Settings to manage emulators.</p><button class="btn primary" data-act="gosettings">Open Settings</button></div>`;
     else if (EM.err) html = `<div class="empty"><p>${esc(EM.err)}</p></div>`;
     else if (!EM.apps.length) html = `<div class="empty"><p>${EM.busy || !EM.loaded ? "Looking for emulators on the PS5…" : "No emulators on the PS5 yet. Click Install from a ZIP and pick an emulator's download."}</p></div>`;
-    else html = `<div class="emugrid">` + EM.apps.map(a => `<button class="emucard" data-emuopen="${esc(a.path)}">
+    else html = romLibNote() + `<div class="emugrid">` + EM.apps.map(a => `<button class="emucard" data-emuopen="${esc(a.path)}">
         ${emuIcon(a)}<span class="emutxt"><b>${esc(a.name)}</b><small>${esc(a.system || "Homebrew app")}</small>
         <small>${a.gamesDir ? `${a.games} game${a.games === 1 ? "" : "s"}${a.size ? ", " + size(a.size) : ""}` : "Games folder not set"} · ${esc(a.drive)}</small></span></button>`).join("") + `</div>`;
   } else {
@@ -635,6 +635,16 @@ function renderEmu() {
   }
   if (bar.dataset.sig !== bh) { bar.dataset.sig = bh; bar.innerHTML = bh; }
   if (body.dataset.sig !== html) { body.dataset.sig = html; body.innerHTML = html; }
+}
+// the ROM library the PS5 app downloads from: one folder per system
+function romLibNote() {
+  const f = S.settings.RomFolder;
+  return `<p class="emuhint romlib">${f ? `ROM library: <span class="mono">${esc(f)}</span>. The Loadout app on the PS5 lists the games in it under Emulators and downloads them to the right emulator.`
+    : "Keep your ROMs on this PC? Click <b>ROM library</b> and pick the folder: one folder per system inside it (Switch for ProsperoEden, anything else goes to RetroArch). Then download them from the Loadout app on the PS5."}</p>`;
+}
+async function pickRomLib() {
+  const p = await api("pick", { title: "Pick your ROM folder (one folder per system inside it)", start: S.settings.RomFolder || "" }).catch(e => toast(e.message, true));
+  if (p) await act("settings", { romFolder: p }, "ROM library set. The PS5 app shows it under Emulators.");
 }
 async function emuPickDir(app) {
   let d; try { d = await api("fx/list", { Dir: app.path, Mode: "homebrew" }); } catch (e) { toast(e.message, true); return; }
@@ -700,6 +710,7 @@ $("#view-emu").addEventListener("click", async e => {
     case "browse": FX.dirs.homebrew = ""; return showView("homebrew");
     case "files": FX.dirs.homebrew = app.path; return showView("homebrew");
     case "refresh": return emuLoad();
+    case "romlib": return pickRomLib();
     case "back": EM.cur = ""; return renderEmu();
     case "add":
       if (emuSlot(app).key === "mods") return cheatsAdd(emuSlot(app).dir);

@@ -28,9 +28,9 @@ import (
 
 // StoreDevice is a paired PS5 (or anything else that paired with the PIN).
 type StoreDevice struct {
-	ID    string    // short id shown in Settings
-	Name  string    // what the device called itself
-	Hash  string    // sha256 of its token; the token itself is never saved
+	ID    string // short id shown in Settings
+	Name  string // what the device called itself
+	Hash  string // sha256 of its token; the token itself is never saved
 	Added time.Time
 	Seen  time.Time
 }
@@ -110,28 +110,132 @@ func (a *App) forgetStoreDeviceLocked(id string) {
 // ---------- what the store shows ----------
 
 type storeGame struct {
-	Key       string   `json:"key"`
-	Name      string   `json:"name"`
-	ID        string   `json:"id"`
-	Platform  string   `json:"platform"`
-	Version   string   `json:"version"`
-	Size      int64    `json:"size"`
-	Publisher string   `json:"publisher"`
-	Release   string   `json:"release"`
-	Genres    []string `json:"genres"`
-	Desc      string   `json:"desc"`
-	Rating    float64  `json:"rating"`
-	Ratings   int      `json:"ratings"`
-	Rated     string   `json:"rated"`
-	Cover     string   `json:"cover"` // art key for /s/art, "" when there is none
-	Hero      string   `json:"hero"`
-	Shots     int      `json:"shots"` // screenshots, at /s/art?k=<lib>&f=shot<n>
-	Lib       string   `json:"lib"`
-	Ready     bool     `json:"ready"`  // an image is built, so it can be sent right away
-	CanGet    bool     `json:"canGet"` // it can be built (if needed) and sent
-	OnPS5     string   `json:"onPs5"`  // where it already is on the PS5, if anywhere
-	FirstSeen string   `json:"firstSeen"`
+	Key       string     `json:"key"`
+	Name      string     `json:"name"`
+	ID        string     `json:"id"`
+	Platform  string     `json:"platform"`
+	Version   string     `json:"version"`
+	Size      int64      `json:"size"`
+	Publisher string     `json:"publisher"`
+	Release   string     `json:"release"`
+	Genres    []string   `json:"genres"`
+	Desc      string     `json:"desc"`
+	Rating    float64    `json:"rating"`
+	Ratings   int        `json:"ratings"`
+	Rated     string     `json:"rated"`
+	Cover     string     `json:"cover"` // art key for /s/art, "" when there is none
+	Hero      string     `json:"hero"`
+	Shots     int        `json:"shots"` // screenshots, at /s/art?k=<lib>&f=shot<n>
+	Lib       string     `json:"lib"`
+	DLC       []storeDLC `json:"dlc"`
+	Ready     bool       `json:"ready"`  // an image is built, so it can be sent right away
+	CanGet    bool       `json:"canGet"` // it can be built (if needed) and sent
+	OnPS5     string     `json:"onPs5"`  // where it already is on the PS5, if anywhere
+	FirstSeen string     `json:"firstSeen"`
 	storeProgress
+}
+
+// storeDLC is one piece of a game's DLC; PKG files can be installed from the PS5.
+type storeDLC struct {
+	Key  string `json:"key"` // its path on this PC
+	Name string `json:"name"`
+	Kind string `json:"kind"`
+	Size int64  `json:"size"`
+	Pkg  bool   `json:"pkg"`
+}
+
+func itemDLC(it Item) []DLC {
+	return append(append(append([]DLC{}, it.DLC...), it.Incoming...), it.Loose...)
+}
+
+var (
+	pkgsMu    sync.Mutex
+	pkgsCache = map[string]pkgsSeen{}
+)
+
+type pkgsSeen struct {
+	at   time.Time
+	pkgs []DLC
+}
+
+// pkgsIn finds the DLC packages in a folder, a few levels down at most. A
+// raw DLC dump (a folder with sce_sys in it) holds no packages and can hold
+// thousands of files, so it isn't walked. Results are kept a couple of
+// minutes: the PS5 asks for the game list every minute.
+func pkgsIn(dir string) []DLC {
+	pkgsMu.Lock()
+	defer pkgsMu.Unlock()
+	if c, ok := pkgsCache[dir]; ok && time.Since(c.at) < 2*time.Minute {
+		return c.pkgs
+	}
+	var out []DLC
+	base := strings.Count(filepath.Clean(dir), string(filepath.Separator))
+	filepath.WalkDir(dir, func(p string, e os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if e.IsDir() {
+			if strings.Count(filepath.Clean(p), string(filepath.Separator))-base >= 3 {
+				return filepath.SkipDir
+			}
+			if fi, err := os.Stat(filepath.Join(p, "sce_sys")); err == nil && fi.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.EqualFold(filepath.Ext(p), ".pkg") {
+			if x, ok := dlcFromPkg(p, true); ok {
+				if fi, err := e.Info(); err == nil {
+					x.Size = fi.Size()
+				}
+				out = append(out, x)
+			}
+		}
+		return nil
+	})
+	pkgsCache[dir] = pkgsSeen{time.Now(), out}
+	return out
+}
+
+// storeDLCFor lists a game's DLC for the PS5. A DLC folder that holds .pkg
+// files (a few levels down at most) is listed as those packages, since a
+// package is what the PS5 can install.
+func storeDLCFor(it Item) []storeDLC {
+	game := it.Name
+	if game == "" {
+		game = it.Current
+	}
+	named := func(d DLC) string {
+		if n := shortDLCName(d.Name, game); n != "" {
+			return n
+		}
+		if n := dlcLabel(d.ContentID); n != "" {
+			return n
+		}
+		if d.Name != "" {
+			return d.Name
+		}
+		return d.File
+	}
+	out := []storeDLC{}
+	for _, d := range itemDLC(it) {
+		if strings.HasPrefix(d.Kind, "PKG") {
+			out = append(out, storeDLC{Key: d.Path, Name: named(d), Kind: d.Kind, Size: d.Size, Pkg: true})
+			continue
+		}
+		var pkgs []storeDLC
+		if d.Kind == "Folder" {
+			for _, x := range pkgsIn(d.Path) {
+				pkgs = append(pkgs, storeDLC{Key: x.Path, Name: named(x), Kind: x.Kind, Size: x.Size, Pkg: true})
+			}
+		}
+		if len(pkgs) > 0 {
+			out = append(out, pkgs...)
+		} else if d.Size > 0 {
+			out = append(out, storeDLC{Key: d.Path, Name: named(d), Kind: d.Kind, Size: d.Size})
+		}
+	}
+	return out
 }
 
 type storeProgress struct {
@@ -173,6 +277,16 @@ func (a *App) storeProgressLocked() map[string]storeProgress {
 			p = storeProgress{State: j.State, Pct: j.Pct, Note: j.Note}
 			if p.State == "done" {
 				p.State = "sent"
+			}
+		case strings.HasPrefix(j.Key, "dlc:") || strings.HasPrefix(j.Key, "rom:") || strings.HasPrefix(j.Key, "save:") || strings.HasPrefix(j.Key, "rest:"):
+			// DLC installs, ROM downloads and save backups and restores
+			switch j.State {
+			case "queued", "failed", "cancelled", "skipped":
+				p = storeProgress{State: j.State, Note: j.Note}
+			case "done":
+				p = storeProgress{State: "sent", Pct: 1000, Note: j.Note}
+			default:
+				p = storeProgress{State: "sending", Pct: j.Pct, Note: j.Note}
 			}
 		default:
 			continue
@@ -218,6 +332,7 @@ func (a *App) storeGamesLocked() []storeGame {
 		if g.Shots > 0 {
 			g.Lib = it.LibKey
 		}
+		g.DLC = storeDLCFor(it)
 		games = append(games, g)
 	}
 	sort.Slice(games, func(i, j int) bool { return strings.ToLower(games[i].Name) < strings.ToLower(games[j].Name) })
@@ -271,6 +386,88 @@ func (a *App) storeGet(key, drive string) (string, error) {
 		return "Your PC is preparing " + name + ". The download starts when it's ready.", nil
 	}
 	return "", errors.New("That game isn't in Loadout's library any more.")
+}
+
+// storeDLCInstall has the PS5 install one of a game's DLC packages, the way
+// a PS4 package from the library is installed (etaHEN's package installer).
+func (a *App) storeDLCInstall(game, file string) (string, error) {
+	a.mu.Lock()
+	st := a.stateLocked()
+	a.toast = append(st.Toasts, a.toast...)
+	noPS5 := strings.TrimSpace(a.cfg.PS5IP) == ""
+	a.mu.Unlock()
+	if noPS5 {
+		return "", errors.New("Set your PS5's IP address in Loadout's Settings first.")
+	}
+	for _, it := range st.Items {
+		if it.Key != game {
+			continue
+		}
+		for _, d := range storeDLCFor(it) {
+			if d.Key != file {
+				continue
+			}
+			if !d.Pkg {
+				return "", errors.New("Only DLC that comes as a .pkg file can be installed from here.")
+			}
+			fi, err := os.Stat(d.Key)
+			if err != nil {
+				return "", errors.New("That DLC file isn't on your PC any more.")
+			}
+			name := d.Name
+			a.mu.Lock()
+			j := &BuildJob{Key: "dlc:" + d.Key, Kind: "pkginst", Name: name, Out: filepath.Base(d.Key), State: "queued", Size: fi.Size(), image: d.Key}
+			a.addJobsLocked([]*BuildJob{j})
+			a.enqueuePS5Locked(j)
+			a.mu.Unlock()
+			return "Installing " + name + ". The PS5 fetches it from your PC; watch its Downloads list.", nil
+		}
+		return "", errors.New("That DLC isn't with this game any more.")
+	}
+	return "", errors.New("That game isn't in Loadout's library any more.")
+}
+
+// storeSaves is one game's saves on the PS5 and its backups on this PC. The
+// list of saves on the PS5 is refreshed in the background when it's old.
+func (a *App) storeSaves(id string) map[string]any {
+	a.mu.Lock()
+	if !a.saves.Busy && time.Since(a.saves.Scanned) > time.Minute {
+		go a.refreshSaves()
+	}
+	saves, backups := []PS5Save{}, []SaveBackup{}
+	for _, s := range a.saves.Saves {
+		if s.TitleID == id {
+			saves = append(saves, s)
+		}
+	}
+	for _, b := range a.saves.Backups {
+		if b.TitleID == id {
+			backups = append(backups, b)
+		}
+	}
+	sort.Slice(backups, func(i, j int) bool { return backups[i].When.After(backups[j].When) })
+	res := map[string]any{"saves": saves, "backups": backups, "busy": a.saves.Busy || a.saves.Scanned.IsZero(), "err": a.saves.Err}
+	a.mu.Unlock()
+	return res
+}
+
+func (a *App) storeSaveBackup(id, name string) error {
+	a.mu.Lock()
+	var items []saveReq
+	for _, s := range a.saves.Saves {
+		if s.TitleID == id {
+			items = append(items, saveReq{User: s.User, TitleID: s.TitleID, Kind: s.Kind, Name: name})
+		}
+	}
+	scanned := !a.saves.Scanned.IsZero()
+	a.mu.Unlock()
+	if len(items) == 0 {
+		if !scanned {
+			return errors.New("Still reading the saves on your PS5. Try again in a moment.")
+		}
+		return errors.New("There's no save for this game on your PS5.")
+	}
+	return a.startSaveBackup(items)
 }
 
 // storeArtPath finds the picture behind an art key: "cover" is the game's
@@ -415,6 +612,40 @@ func (a *App) storeRoutes(mux *http.ServeMux, rs *remoteServer, writeJSON func(h
 		var b struct{ Key, Drive string }
 		json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&b)
 		msg, err := a.storeGet(b.Key, b.Drive)
+		return map[string]string{"msg": msg}, err
+	}))
+	mux.HandleFunc("/s/dlc/install", post(func(r *http.Request) (any, error) {
+		var b struct{ Game, File string }
+		json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&b)
+		msg, err := a.storeDLCInstall(b.Game, b.File)
+		return map[string]string{"msg": msg}, err
+	}))
+	mux.HandleFunc("/s/saves", get(func(r *http.Request) any {
+		return a.storeSaves(r.URL.Query().Get("id"))
+	}))
+	mux.HandleFunc("/s/saves/backup", post(func(r *http.Request) (any, error) {
+		var b struct{ ID, Name string }
+		json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&b)
+		return nil, a.storeSaveBackup(b.ID, b.Name)
+	}))
+	mux.HandleFunc("/s/saves/restore", post(func(r *http.Request) (any, error) {
+		var b struct{ Backup string }
+		json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&b)
+		return nil, a.startSaveRestore(b.Backup)
+	}))
+	mux.HandleFunc("/s/roms", get(func(r *http.Request) any {
+		a.mu.Lock()
+		root := a.cfg.RomFolder
+		a.mu.Unlock()
+		if root == "" {
+			return map[string]any{"folder": "", "systems": []romSystem{}}
+		}
+		return map[string]any{"folder": root, "systems": scanRoms(root)}
+	}))
+	mux.HandleFunc("/s/roms/get", post(func(r *http.Request) (any, error) {
+		var b struct{ Key string }
+		json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&b)
+		msg, err := a.startRomGet(b.Key)
 		return map[string]string{"msg": msg}, err
 	}))
 	mux.HandleFunc("/s/stop", post(func(r *http.Request) (any, error) {

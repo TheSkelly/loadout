@@ -17,6 +17,7 @@ cp "$HERE"/app.json "$HERE"/*.jsx "$HERE"/*.js "$APP/"
 [ -f "$HERE/sce_sys/icon0.png" ] || (cd "$HERE" && "$PS5_REACT/.venv/bin/python3" tools/make_art.py)
 cp "$HERE"/sce_sys/*.png "$APP/sce_sys/"
 cp "$PS5_REACT/apps/starter/assets/Inter-Regular.ttf" "$APP/assets/"
+cp "$HERE"/assets/*.png "$APP/assets/"
 
 cd "$PS5_REACT"
 . .venv/bin/activate
