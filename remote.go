@@ -38,6 +38,7 @@ type RemoteInfo struct {
 	Err       string   `json:"err"`
 	HasPIN    bool     `json:"hasPin"`
 	Devices   []StoreDeviceView `json:"devices"` // PS5 apps paired with the PIN
+	PS5App    bool              `json:"ps5App"`  // this copy of Loadout carries the PS5 app
 }
 
 type remoteServer struct {
@@ -85,7 +86,7 @@ func localAddrs() (all []string, tailscale string) {
 
 func (a *App) remoteInfoLocked() RemoteInfo {
 	ri := RemoteInfo{On: a.cfg.RemoteOn, Port: a.cfg.RemotePort, Err: a.remoteErr, HasPIN: len(a.cfg.RemotePIN) >= 4, URLs: []string{},
-		Devices: a.storeDeviceViewsLocked()}
+		Devices: a.storeDeviceViewsLocked(), PS5App: ps5AppIncluded()}
 	if ri.Port == 0 {
 		ri.Port = defaultRemotePort
 	}

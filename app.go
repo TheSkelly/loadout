@@ -1879,6 +1879,7 @@ func (a *App) handler() http.Handler {
 	a.homeRoutes(api, func(r *http.Request, v any) { body(r, v) })
 	a.profRoutes(api, func(r *http.Request, v any) { body(r, v) })
 	a.fwdRoutes(api, func(r *http.Request, v any) { body(r, v) })
+	api("/api/ps5app/install", func(r *http.Request) (any, error) { return a.installPS5App() })
 	a.cheatRoutes(api, func(r *http.Request, v any) { body(r, v) })
 	a.gameIDRoutes(api, func(r *http.Request, v any) { body(r, v) })
 	a.cheatViewRoutes(api, func(r *http.Request, v any) { body(r, v) })

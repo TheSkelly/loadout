@@ -3,5 +3,6 @@ Loadout.exe
 *.exe~
 Loadout-Setup-*.exe
 *.syso
+ps5app/dist/
 # personal Claude Code settings
 .claude/settings.local.json

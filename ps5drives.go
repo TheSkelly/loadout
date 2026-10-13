@@ -253,6 +253,9 @@ func scanPS5Games(f *ftpConn, drives []PS5Drive, names map[string]string, report
 			if _, emu := knownEmus[id]; emu && e.IsDir {
 				continue // an emulator: it has its own tab
 			}
+			if id == ps5AppID {
+				continue // Loadout's own PS5 app, not a game
+			}
 			found++
 			others = others[:len(others)-1]
 			c := PS5Copy{Drive: drive, Path: path.Join(dir, name), Kind: k, Size: e.Size}

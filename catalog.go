@@ -6,13 +6,16 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -408,6 +411,133 @@ func (a *App) storeRoutes(mux *http.ServeMux, rs *remoteServer, writeJSON func(h
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Write(b)
 	})
+}
+
+// ---------- the PS5 app ----------
+
+// The Loadout app for the PS5 (ps5app/, built with PS5 React) ships inside
+// Loadout's install folder. Installing it copies it to the PS5's homebrew
+// folder, where ShadowMountPlus puts it on the home screen (under Media), with
+// a loadout.json next to it: the PC's addresses and a token it is paired with.
+// The PS5 can't type or look around the network, so that file is how it
+// finds this PC.
+
+const (
+	ps5AppID         = "PPSA99880"
+	ps5AppDeviceName = "Loadout PS5 app"
+)
+
+var (
+	ps5AppOnce sync.Once
+	ps5AppHave bool
+)
+
+// ps5AppIncluded says whether this copy of Loadout carries the PS5 app (checked once).
+func ps5AppIncluded() bool {
+	ps5AppOnce.Do(func() { ps5AppHave = ps5AppSource() != "" })
+	return ps5AppHave
+}
+
+// ps5AppSource is the built app folder: next to Loadout.exe once installed,
+// or in ps5app/dist when running a build from the project folder.
+func ps5AppSource() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Dir(exe)
+	for _, p := range []string{filepath.Join(dir, "PS5App", ps5AppID), filepath.Join(dir, "ps5app", "dist", ps5AppID)} {
+		if fileExists(filepath.Join(p, "eboot.bin")) {
+			return p
+		}
+	}
+	return ""
+}
+
+// copyTree copies a folder, for staging the app before it's sent.
+func copyTree(src, dst string) error {
+	return filepath.Walk(src, func(p string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, p)
+		target := filepath.Join(dst, rel)
+		if fi.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+		return copyFile(p, target)
+	})
+}
+
+// installPS5App pairs the PS5 app and queues sending it to the PS5.
+func (a *App) installPS5App() (string, error) {
+	src := ps5AppSource()
+	if src == "" {
+		return "", errors.New("The PS5 app isn't included with this copy of Loadout.")
+	}
+	a.mu.Lock()
+	running := a.remote != nil
+	port := a.cfg.RemotePort
+	hasPS5 := strings.TrimSpace(a.cfg.PS5IP) != ""
+	a.mu.Unlock()
+	if !hasPS5 {
+		return "", errors.New("Set your PS5's IP address in Settings first.")
+	}
+	if !running {
+		return "", errors.New("Turn on the phone remote first (it needs a PIN). The PS5 app talks to Loadout through it.")
+	}
+	if port == 0 {
+		port = defaultRemotePort
+	}
+	// home network addresses first: the PS5 is on the same network as this PC
+	ips, ts := localAddrs()
+	var urls []string
+	for _, ip := range ips {
+		if ip != ts {
+			urls = append(urls, fmt.Sprintf("http://%s:%d", ip, port))
+		}
+	}
+	if ts != "" {
+		urls = append(urls, fmt.Sprintf("http://%s:%d", ts, port))
+	}
+	if len(urls) == 0 {
+		return "", errors.New("This PC doesn't seem to be on a network.")
+	}
+
+	// a fresh pairing each install; the previous one stops working
+	a.mu.Lock()
+	kept := a.cfg.StoreDevices[:0]
+	for _, d := range a.cfg.StoreDevices {
+		if d.Name != ps5AppDeviceName {
+			kept = append(kept, d)
+		}
+	}
+	a.cfg.StoreDevices = kept
+	a.mu.Unlock()
+	token := a.pairStoreDevice(ps5AppDeviceName)
+
+	tmp, err := os.MkdirTemp("", "loadout-ps5app-")
+	if err != nil {
+		return "", err
+	}
+	stage := filepath.Join(tmp, ps5AppID)
+	if err := copyTree(src, stage); err != nil {
+		os.RemoveAll(tmp)
+		return "", fmt.Errorf("Couldn't get the app ready: %v", err)
+	}
+	host, _ := os.Hostname()
+	cfg, _ := json.MarshalIndent(map[string]any{"pc": host, "urls": urls, "token": token}, "", "  ")
+	if err := os.WriteFile(filepath.Join(stage, "loadout.json"), cfg, 0644); err != nil {
+		os.RemoveAll(tmp)
+		return "", err
+	}
+	dest := path.Join(fwdRoot, ps5AppID)
+	a.mu.Lock()
+	j := &BuildJob{Key: "fx:" + dest, Kind: "fxupdir", Name: "Loadout app for the PS5", Out: ps5AppID, State: "queued", Size: folderSize(stage), image: stage, Dest: dest}
+	a.addJobsLocked([]*BuildJob{j})
+	a.enqueuePS5Locked(j)
+	a.mu.Unlock()
+	return "Sending the Loadout app to the PS5. When it's done, ShadowMountPlus adds it to the home screen under Media.", nil
 }
 
 // ---------- finding Loadout on the network ----------

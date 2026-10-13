@@ -31,6 +31,12 @@ Write-Host "Building Loadout.exe..."
 Run go build -trimpath -ldflags "-s -w -H windowsgui" -o Loadout.exe .
 
 if (-not $NoInstaller) {
+    # the installer carries the PS5 app; build it (in WSL) if it isn't built yet
+    if (-not (Test-Path "ps5app\dist\PPSA99880\eboot.bin")) {
+        Write-Host "Building the PS5 app (WSL)..."
+        $wslHere = "/mnt/" + $PSScriptRoot.Substring(0, 1).ToLower() + ($PSScriptRoot.Substring(2) -replace '\\', '/')
+        Run wsl -d Ubuntu-24.04 -u root -- bash "$wslHere/ps5app/build-ps5.sh"
+    }
     Write-Host "Building installer..."
     Run "${env:ProgramFiles(x86)}\NSIS\makensis.exe" /V2 installer.nsi
     Write-Host "Done: Loadout-Setup-$appVer.exe"

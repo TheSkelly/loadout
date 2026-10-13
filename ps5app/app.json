@@ -1,0 +1,18 @@
+{
+  "$schema": "../../app.schema.json",
+  "titleId": "PPSA99880",
+  "contentId": "UP9000-PPSA99880_00-LOADOUTSTORE0000",
+  "name": "Loadout",
+  "version": "01.000.000",
+  "render": {
+    "width": 1920,
+    "height": 1080
+  },
+  "surface": {
+    "width": 1920,
+    "height": 1080
+  },
+  "timeoutSeconds": 0,
+  "networking": true,
+  "filesystemAccess": "console"
+}
