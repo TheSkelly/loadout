@@ -261,7 +261,7 @@ func (a *App) opts() NameOpts {
 	names := map[string]string{}
 	for k, p := range a.imageIndex() {
 		if id := strings.TrimPrefix(k, "id:"); id != k {
-			if n := itemFromImage(p).Name; n != "" {
+			if n, _ := imageTitle(p); n != "" {
 				names[id] = n
 			}
 		}
@@ -475,15 +475,23 @@ func (a *App) imageIndex() map[string]string {
 var imgVerRe = regexp.MustCompile(`(?i)\bv?(\d{2}\.\d{3}\.\d{3})\b`)
 
 // itemFromImage makes a library card for an image whose game Loadout never saw.
-func itemFromImage(p string) Item {
+// imageTitle reads a game's name and title ID from its image's file name.
+// It touches no disk: opts() calls it for every image, many times a request.
+func imageTitle(p string) (title, id string) {
 	base := strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
-	id := findID(base)
-	title := base
+	id = findID(base)
+	title = base
 	if id != "" {
 		if i := strings.Index(strings.ToUpper(title), id); i > 0 {
 			title = strings.TrimRight(title[:i], " [(-_")
 		}
 	}
+	return title, id
+}
+
+func itemFromImage(p string) Item {
+	base := strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))
+	title, id := imageTitle(p)
 	it := Item{Key: "img:" + p, Name: title, TitleID: id, Current: base, Image: p, ExfatOnly: true, Status: "exFAT only", Sized: true}
 	if m := imgVerRe.FindStringSubmatch(base); m != nil {
 		it.Version = m[1]
