@@ -169,11 +169,11 @@ func PlanExfat(src, label string) (*ExfatPlan, error) {
 	if err := scanExfat(src, p.root, p); err != nil {
 		return nil, err
 	}
-	// cluster size: 64K for big-file games, else 32K (same rule as OSFMount script)
-	p.clusterSize, p.spcShift = 32768, 6
-	if p.Files > 0 && p.DataBytes/int64(p.Files) >= 1<<20 {
-		p.clusterSize, p.spcShift = 65536, 7
-	}
+	// 64K clusters always: ShadowMountPlus (1.7beta1+) reads images with 64K
+	// clusters and 512-byte sectors through its fast path, and smaller
+	// clusters cost speed. A game with many small files spends a little more
+	// space on it; it used to get 32K, which missed the fast path.
+	p.clusterSize, p.spcShift = 65536, 7
 	cs := p.clusterSize
 
 	// content clusters: up-case, root, dirs, files
