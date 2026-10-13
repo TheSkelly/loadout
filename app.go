@@ -1395,6 +1395,21 @@ func (a *App) runBuild(jobs []*BuildJob, out string, overwrite, removeAfter bool
 			set(j, "cancelled", "")
 			continue
 		}
+		if j.Kind == "unpack" {
+			set(j, "building", "Reading the image")
+			note, err := a.runUnpack(j, cancelled)
+			switch {
+			case errors.Is(err, ErrCancelled):
+				set(j, "cancelled", "")
+			case err != nil:
+				set(j, "failed", err.Error())
+				failed++
+			default:
+				set(j, "done", note)
+				ok++
+			}
+			continue
+		}
 		if j.Kind == "remove" {
 			gone, note, bad := a.removeSource(j, j.image)
 			state := "done"
@@ -1509,7 +1524,12 @@ func (a *App) runBuild(jobs []*BuildJob, out string, overwrite, removeAfter bool
 	}
 	a.build.Building, a.build.File, a.build.ETA, a.build.Speed = false, "", 0, 0
 	s := fmt.Sprintf("Built %d image(s) in %s.", ok, fmtDur(time.Since(start)))
-	if len(jobs) > 0 && jobs[0].Kind == "remove" {
+	if len(jobs) > 0 && jobs[0].Kind == "unpack" {
+		s = fmt.Sprintf("Turned %d image(s) into game folders in %s.", ok, fmtDur(time.Since(start)))
+		if ok > 0 {
+			go a.startScan("") // the new folders show up in the library
+		}
+	} else if len(jobs) > 0 && jobs[0].Kind == "remove" {
 		s = fmt.Sprintf("Moved %d game folder(s) to the Recycle Bin.", removed)
 	} else if removed > 0 {
 		s += fmt.Sprintf(" %d game folder(s) moved to the Recycle Bin.", removed)
@@ -2068,6 +2088,11 @@ func (a *App) handler() http.Handler {
 		return nil, a.startPS5Move(b.Paths, b.Drive)
 	})
 	a.fxRoutes(api, func(r *http.Request, v any) { body(r, v) })
+	api("/api/unpack", func(r *http.Request) (any, error) {
+		var b struct{ Images []string }
+		body(r, &b)
+		return nil, a.startUnpack(b.Images)
+	})
 	api("/api/sendfolder", func(r *http.Request) (any, error) {
 		var b struct {
 			Keys  []string

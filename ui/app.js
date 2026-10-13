@@ -340,6 +340,7 @@ function renderDrawer() {
     ${dlcCount(it) ? `<section class="dlcsec"><h3>DLC <span>${dlcCount(it)}</span></h3>${dlcListHTML(it)}</section>` : ""}
     ${it.present ? `<div class="btns">${buildBtnHTML(it, "")}${it.isPkg ? "" : `<button class="btn ghost" data-act="folder" data-k="${esc(it.key)}">${ICON.folder}Open folder</button>`}
       ${it.image ? `<button class="btn ghost" data-act="showimg" data-k="${esc(it.key)}">${ICON.check}Show image</button>` : ""}
+      ${it.image && !busy(it) ? `<button class="btn ghost" data-act="unpack" data-img="${esc(it.image)}" title="Copies the image's files back out into a game folder, next to your other games. The image is kept">${ICON.folder}Turn into folder</button>` : ""}
       ${S.settings.PS5IP && it.canBuild && !busy(it) ? `<button class="btn ghost" data-act="sendfolder" data-k="${esc(it.key)}" title="Sends the game's folder as it is, with no exFAT image. ShadowMountPlus runs folder games too">${ICON.send}Send folder to PS5</button>` : ""}
       <button class="btn ghost" data-act="rename1" data-k="${esc(it.key)}">Fix name</button>
       ${it.image && !busy(it) && !(it.dlc || []).length ? `<button class="btn ghost danger" data-act="remove1" data-k="${esc(it.key)}">${ICON.trash}Remove game folder</button>` : ""}
@@ -1383,6 +1384,7 @@ document.addEventListener("click", async e => {
     case "showimg": return act("open", { path: it.image, select: true });
     case "showpkg": return act("open", { path: it.path, select: true });
     case "pkginstall": return act("pkg/install", { Key: k });
+    case "unpack": return act("unpack", { Images: [b.dataset.img] }, "Turning the image into a game folder. Progress shows under Build & send.");
     case "sendfolder": return act("sendfolder", { Keys: [k], Drive: defDrive() }, "Sending the game folder to the PS5. Progress shows under Build & send.");
     case "build1": return buildKeys([k]);
     case "remove1": return removeFolder(it);
