@@ -1059,6 +1059,21 @@ function renderRemote() {
     if (document.activeElement !== $(id)) $(id).value = v;
   $("#closeToTray").checked = !!S.closeToTray; $("#keepAwake").checked = !!S.keepAwake; { const st = S.awakeState === "on" ? "Right now: keeping this PC and its screen awake for the running job." : S.awakeState === "partial" ? "Right now: Windows refused part of the keep-awake request, so it may still sleep. Restarting Loadout usually fixes this." : ""; $("#awakeNotes").innerHTML = (S.keepAwake ? [st, ...(S.awakeNotes || [])] : []).filter(Boolean).map(t => `<p>${esc(t)}</p>`).join(""); }
   $("#trayset").hidden = !S.hasTray;
+  { // the downloads folder
+    const w = S.watch || {};
+    $("#watchFolder").value = S.settings.WatchFolder || "";
+    $("#watchOn").checked = S.settings.WatchOn !== false; $("#watchRecycle").checked = !!S.settings.WatchRecycle;
+    $("#watchOn").disabled = $("#watchCheck").disabled = $("#watchClear").disabled = !S.settings.WatchFolder;
+    const lines = [];
+    if (w.noTool) lines.push(`<p class="warnline">7-Zip isn't installed on this PC. Install it from 7-zip.org and Loadout uses it by itself.</p>`);
+    if (w.busy) lines.push(`<p><b>Extracting ${esc(w.current)}</b> · ${Math.floor((w.pct || 0) / 10)}%</p>`);
+    if (w.err) lines.push(`<p class="warnline">${esc(w.err)}</p>`);
+    for (const x of w.waiting || []) lines.push(`<p>${esc(x)}</p>`);
+    if ((w.done || []).length) lines.push(`<p>Extracted: ${(w.done || []).map(esc).join(", ")}</p>`);
+    if (w.on && w.checked) lines.push(`<p>Last checked at ${esc(w.checked)}.</p>`);
+    const h = lines.join("");
+    if ($("#watchInfo").dataset.sig !== h) { $("#watchInfo").dataset.sig = h; $("#watchInfo").innerHTML = h; }
+  }
   let h = "";
   if (r.err) h = `<p class="warnline">${esc(r.err)}</p>`;
   else if (r.running) {
@@ -1425,6 +1440,14 @@ function savePattern() { clearTimeout(patTimer); patTimer = setTimeout(() => act
 
 $("#pickFolder").onclick = pickGames;
 $("#moreFolders").onclick = manageFolders;
+$("#watchPick").onclick = async () => {
+  const p = await api("pick", { title: "Pick the folder your downloads go to", start: S.settings.WatchFolder || "" }).catch(e => toast(e.message, true));
+  if (p) act("watch/folder", { Path: p }, "Downloads folder set. Checking it now.");
+};
+$("#watchClear").onclick = () => act("watch/folder", { Path: "" }, "Loadout no longer checks a downloads folder.");
+$("#watchCheck").onclick = () => act("watch/check", {}, "Checking the downloads folder…");
+$("#watchOn").onchange = e => act("settings", { watchOn: e.target.checked });
+$("#watchRecycle").onchange = e => act("settings", { watchRecycle: e.target.checked });
 $("#rescan").onclick = () => act("scan", {});
 $("#q").oninput = () => renderLibrary();
 $("#pattern").oninput = savePattern;

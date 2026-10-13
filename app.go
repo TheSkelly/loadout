@@ -31,39 +31,42 @@ const appVersion = "1.59.0"
 var uiFiles embed.FS
 
 type Settings struct {
-	Folder      string
-	MoreFolders []string `json:",omitempty"` // more folders with games, scanned along with Folder
-	ShowMissing bool
-	Ignored     []string
-	Pattern     string
-	SafeNames   *bool
-	WrapLoose   *bool
-	ConsoleFW   string
-	ImageOut    string
-	View        string            // "grid" or "list"
-	RemoveAfter bool              // move the game folder to the Recycle Bin after a verified build
-	NukeBig     bool              // a folder too big for the Recycle Bin is deleted for good without asking
-	RomFolder   string            `json:",omitempty"` // the ROM library the PS5 app downloads from
-	EmuDirs     map[string]string `json:",omitempty"` // emulator folder name -> its games folder, for apps Loadout does not know
-	AutoDir     string            `json:",omitempty"` // the autoloader folder on the PS5, when it is not in a usual place
-	MoveDLC     *bool             // move loose DLC into its game's folder when renaming
-	DLCPattern  string
-	PS5IP       string
-	PS5Port     int
-	PS5Dir      string
-	PS5Drive    string            // drive games go to unless picked per game
-	PS5Dirs     map[string]string // folder to use on each drive
-	SendAfter   bool
-	Payloads    []PayloadItem
-	ImageDirs   []string // image folders used before, still checked for images
-	PayloadPort int      // the PS5's ELF loader, 9021 by default
-	AutoShell   bool     // load shsrv by itself when free space is unknown
-	SlowSend    bool     // old setting, no longer read
-	FastSend    bool     // opt in to the experimental fast receiver
-	PlainFTP    bool     // send over FTP only, never through PS5Upload
-	SendStreams int      // connections per image with the fast receiver (0 = 4)
-	SendAtOnce  int      // images sent at the same time (0 = 2)
-	StoreInfo   *bool    // fetch game info and art from the PlayStation Store
+	Folder       string
+	MoreFolders  []string `json:",omitempty"` // more folders with games, scanned along with Folder
+	WatchFolder  string   `json:",omitempty"` // downloads folder checked for PS5 games in archives
+	WatchOn      *bool    `json:",omitempty"`
+	WatchRecycle bool     `json:",omitempty"` // send the archives to the Recycle Bin once extracted
+	ShowMissing  bool
+	Ignored      []string
+	Pattern      string
+	SafeNames    *bool
+	WrapLoose    *bool
+	ConsoleFW    string
+	ImageOut     string
+	View         string            // "grid" or "list"
+	RemoveAfter  bool              // move the game folder to the Recycle Bin after a verified build
+	NukeBig      bool              // a folder too big for the Recycle Bin is deleted for good without asking
+	RomFolder    string            `json:",omitempty"` // the ROM library the PS5 app downloads from
+	EmuDirs      map[string]string `json:",omitempty"` // emulator folder name -> its games folder, for apps Loadout does not know
+	AutoDir      string            `json:",omitempty"` // the autoloader folder on the PS5, when it is not in a usual place
+	MoveDLC      *bool             // move loose DLC into its game's folder when renaming
+	DLCPattern   string
+	PS5IP        string
+	PS5Port      int
+	PS5Dir       string
+	PS5Drive     string            // drive games go to unless picked per game
+	PS5Dirs      map[string]string // folder to use on each drive
+	SendAfter    bool
+	Payloads     []PayloadItem
+	ImageDirs    []string // image folders used before, still checked for images
+	PayloadPort  int      // the PS5's ELF loader, 9021 by default
+	AutoShell    bool     // load shsrv by itself when free space is unknown
+	SlowSend     bool     // old setting, no longer read
+	FastSend     bool     // opt in to the experimental fast receiver
+	PlainFTP     bool     // send over FTP only, never through PS5Upload
+	SendStreams  int      // connections per image with the fast receiver (0 = 4)
+	SendAtOnce   int      // images sent at the same time (0 = 2)
+	StoreInfo    *bool    // fetch game info and art from the PlayStation Store
 	// phone page, alerts, tray
 	RemoteOn     bool
 	RemotePort   int
@@ -153,6 +156,7 @@ type App struct {
 	sent        map[string]SentInfo // image file name -> where it was sent
 	ps5info     PS5Info
 	addcont     map[string]map[string]bool // DLC installed on the PS5: title ID -> content labels
+	watch       WatchInfo                  // the downloads folder
 	saves       SavesInfo
 	uploads     map[string][]UploadGroup // PS5 folder -> what each upload put there
 	ps5gen      int                      // bumps when the PS5 address changes
@@ -255,6 +259,7 @@ func newApp() *App {
 		return a.build.Running && boolOr(a.cfg.KeepAwake, true)
 	})
 	go a.ps5Loop()
+	go a.watchLoop()
 	go a.spaceLoop()
 	go a.pcDriveLoop()
 	a.cleanTemp()
@@ -368,6 +373,7 @@ type State struct {
 	Scanning    bool                `json:"scanning"`
 	Sizing      int                 `json:"sizing"`
 	Sent        map[string]SentInfo `json:"sent"`
+	Watch       WatchInfo           `json:"watch"` // the downloads folder
 	ScanErr     string              `json:"scanErr"`
 	Items       []Item              `json:"items"`
 	CanUndo     int                 `json:"canUndo"`
@@ -569,6 +575,8 @@ func (a *App) stateLocked() State {
 		st.PS5.Drives = []PS5Drive{}
 	}
 	st.Sent = a.sent
+	st.Watch = a.watch
+	st.Watch.On, st.Watch.Folder = strings.TrimSpace(a.cfg.WatchFolder) != "" && boolOr(a.cfg.WatchOn, true), a.cfg.WatchFolder
 	imgs := a.imageIndex()
 	seen := map[string]bool{}
 	for _, g := range a.games {
@@ -1681,6 +1689,15 @@ func (a *App) handler() http.Handler {
 		if v := flag("autoShell"); v != nil {
 			a.cfg.AutoShell = *v
 		}
+		if v := flag("watchOn"); v != nil {
+			a.cfg.WatchOn = v
+			if *v {
+				go a.checkDownloads()
+			}
+		}
+		if v := flag("watchRecycle"); v != nil {
+			a.cfg.WatchRecycle = *v
+		}
 		if v := flag("ps5AppAuto"); v != nil {
 			a.cfg.PS5AppAuto = v
 			a.ps5AppAt = "" // check again now
@@ -2190,6 +2207,15 @@ func (a *App) handler() http.Handler {
 			os.MkdirAll(b.Path, 0755)
 		}
 		return nil, openPath(b.Path, b.Select)
+	})
+	api("/api/watch/folder", func(r *http.Request) (any, error) {
+		var b struct{ Path string }
+		body(r, &b)
+		return nil, a.setWatchFolder(b.Path)
+	})
+	api("/api/watch/check", func(r *http.Request) (any, error) {
+		go a.checkDownloads()
+		return nil, nil
 	})
 	api("/api/folders/add", func(r *http.Request) (any, error) {
 		var b struct{ Path string }
