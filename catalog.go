@@ -527,6 +527,9 @@ func (a *App) storeRoutes(mux *http.ServeMux, rs *remoteServer, writeJSON func(h
 		if d == nil {
 			return false
 		}
+		if d.Name == ps5AppDeviceName {
+			a.storeHitAt = time.Now()
+		}
 		if time.Since(d.Seen) > time.Hour {
 			d.Seen = time.Now()
 			saveJSON("settings.json", a.cfg)
@@ -806,6 +809,7 @@ func (a *App) installPS5App() (string, error) {
 		os.RemoveAll(tmp)
 		return "", err
 	}
+	os.WriteFile(filepath.Join(stage, ps5AppStampFile), []byte(ps5AppStamp()), 0644)
 	dest := path.Join(fwdRoot, ps5AppID)
 	a.mu.Lock()
 	j := &BuildJob{Key: "fx:" + dest, Kind: "fxupdir", Name: "Loadout app for the PS5", Out: ps5AppID, State: "queued", Size: folderSize(stage), image: stage, Dest: dest}
@@ -813,6 +817,86 @@ func (a *App) installPS5App() (string, error) {
 	a.enqueuePS5Locked(j)
 	a.mu.Unlock()
 	return "Sending the Loadout app to the PS5. When it's done, ShadowMountPlus adds it to the home screen under Media.", nil
+}
+
+// ---------- keeping the PS5 app up to date ----------
+
+// Each build of the PS5 app is stamped with a hash of its eboot.bin, kept in
+// a file in the app's folder on the PS5. When Loadout carries a different
+// build than the PS5 has, it sends the new files by itself: no re-pairing,
+// since the PS5's loadout.json is left as it is. Files go up under a
+// temporary name and are renamed over the old ones, so an app that is
+// suspended on the PS5 keeps its old files until it's restarted. The stamp
+// file's name sorts last, so it's only written once everything else is there.
+const ps5AppStampFile = "zz-loadout-build.txt"
+
+var (
+	ps5AppStampOnce sync.Once
+	ps5AppStampVal  string
+)
+
+func ps5AppStamp() string {
+	ps5AppStampOnce.Do(func() {
+		if src := ps5AppSource(); src != "" {
+			if b, err := os.ReadFile(filepath.Join(src, "eboot.bin")); err == nil {
+				h := sha256.Sum256(b)
+				ps5AppStampVal = hex.EncodeToString(h[:8])
+			}
+		}
+	})
+	return ps5AppStampVal
+}
+
+// autoUpdatePS5App sends this build of the PS5 app to the PS5 when the PS5
+// has the app but an older build, and the app isn't open there right now.
+func (a *App) autoUpdatePS5App() {
+	src, stamp := ps5AppSource(), ps5AppStamp()
+	if src == "" || stamp == "" {
+		return
+	}
+	dir := path.Join(fwdRoot, ps5AppID)
+	a.mu.Lock()
+	host, port := strings.TrimSpace(a.cfg.PS5IP), a.cfg.PS5Port
+	skip := !boolOr(a.cfg.PS5AppAuto, true) || host == "" || !a.ps5info.Online || a.ps5AppAt == host+"|"+stamp ||
+		time.Since(a.storeHitAt) < 20*time.Second // open on the PS5: wait until it's closed
+	for _, j := range a.build.Jobs {
+		if j.Key == "fx:"+dir && (j.State == "queued" || j.State == "copying") {
+			skip = true // already on its way
+		}
+	}
+	a.mu.Unlock()
+	if skip {
+		return
+	}
+	f, err := ftpDial(host, port)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	if n, ok := f.size(path.Join(dir, "loadout.json")); !ok || n == 0 {
+		return // not installed: the first install is done from Settings, where it gets paired
+	}
+	if b, err := f.get(path.Join(dir, ps5AppStampFile), 64); err == nil && strings.TrimSpace(string(b)) == stamp {
+		a.mu.Lock()
+		a.ps5AppAt = host + "|" + stamp
+		a.mu.Unlock()
+		return
+	}
+	// stage the new build, without loadout.json so the PS5 keeps its pairing
+	stage := filepath.Join(os.TempDir(), "loadout-ps5app-update", ps5AppID)
+	os.RemoveAll(filepath.Dir(stage))
+	if err := copyTree(src, stage); err != nil {
+		return
+	}
+	os.Remove(filepath.Join(stage, "loadout.json"))
+	if os.WriteFile(filepath.Join(stage, ps5AppStampFile), []byte(stamp), 0644) != nil {
+		return
+	}
+	a.mu.Lock()
+	j := &BuildJob{Key: "fx:" + dir, Kind: "fxupdir", Name: "Loadout app update for the PS5", Out: ps5AppID, State: "queued", Size: folderSize(stage), image: stage, Dest: dir}
+	a.addJobsLocked([]*BuildJob{j})
+	a.enqueuePS5Locked(j)
+	a.mu.Unlock()
 }
 
 // ---------- finding Loadout on the network ----------

@@ -71,6 +71,7 @@ type Settings struct {
 	AlertNtfy    string        // ntfy topic or full URL
 	AlertDiscord string // Discord webhook URL
 	KeepAwake    *bool  // keep the PC awake while jobs run
+	PS5AppAuto   *bool  // send new builds of the PS5 app to the PS5 by themselves
 	CloseToTray  *bool  // closing the window hides it in the tray
 	// old fields kept so settings from 1.x load cleanly
 	Format     int  `json:",omitempty"`
@@ -166,6 +167,8 @@ type App struct {
 	imgCache    map[string]string
 	artKick     chan string
 	remote      *remoteServer
+	storeHitAt  time.Time // the PS5 app's last request: it polls every few seconds while open
+	ps5AppAt    string    // "host|stamp" once the PS5 is known to have this build of the PS5 app
 	remoteErr   string
 	imgCacheKey string
 	imgCacheAt  time.Time
@@ -1537,6 +1540,11 @@ func (a *App) handler() http.Handler {
 		a.ps5cond.Broadcast()
 		if v := flag("autoShell"); v != nil {
 			a.cfg.AutoShell = *v
+		}
+		if v := flag("ps5AppAuto"); v != nil {
+			a.cfg.PS5AppAuto = v
+			a.ps5AppAt = "" // check again now
+			go a.autoUpdatePS5App()
 		}
 		if v := flag("keepAwake"); v != nil {
 			a.cfg.KeepAwake = v
