@@ -273,7 +273,7 @@ function Spotlight({game, prog}) {
   if (!game) return null;
   const st = stateOf(game, prog);
   const meta = [game.platform, size(game.size), (game.genres || []).slice(0, 2).join(', '), game.rating ? `★ ${game.rating.toFixed(1)}` : '',
-    game.dlc && game.dlc.length ? `${game.dlc.length} DLC` : ''].filter(Boolean).join('   ·   ');
+    game.dlc && game.dlc.length ? `${game.dlc.length} DLC${dlcDone(game) ? ` (${dlcDone(game) === game.dlc.length ? 'all' : dlcDone(game)} installed)` : ''}` : ''].filter(Boolean).join('   ·   ');
   return (
     <View className="w-[680px] px-[48px] pt-[12px] gap-[8px]">
       <Text className={`${T} text-[38px] leading-[46px] font-bold line-clamp-2`}>{game.name}</Text>
@@ -330,7 +330,7 @@ function Games({games, progress, onOpen}) {
     const recent = games.filter(g => seen(g.firstSeen)).sort((a, b) => seen(b.firstSeen) - seen(a.firstSeen) || byName(a, b)).slice(0, 15);
     const notOn = games.filter(g => !g.onPs5 && g.canGet);
     const onPs5 = games.filter(g => g.onPs5);
-    const dlc = games.filter(g => g.dlc && g.dlc.some(d => d.pkg));
+    const dlc = games.filter(g => g.dlc && g.dlc.some(d => d.pkg && !d.installed));
     // the genres with the most games get rails of their own
     const count = {};
     for (const g of games) for (const x of g.genres || []) count[x] = (count[x] || 0) + 1;
@@ -531,19 +531,26 @@ function Viewer({k, count, start, onClose}) {
 // a row in the game page's DLC and saves lists. The whole row is the button,
 // with its action at the right, so Down from the buttons above lands on it
 // (a small button at the far right was too far off to the side to be picked).
-function RowText({title, sub}) {
+function RowText({title, sub, tag}) {
   return (
     <View className="flex-1 gap-[2px]">
-      <Text className={`${T} text-base truncate`}>{title}</Text>
+      <View className="flex-row items-center gap-[10px]">
+        <Text className={`${T} text-base truncate`}>{title}</Text>
+        {tag ? (
+          <View className="px-[10px] py-[2px] rounded-full bg-mint/20 border border-mint">
+            <Text className="font-inter text-xs font-bold text-mint">{tag}</Text>
+          </View>
+        ) : null}
+      </View>
       {sub ? <Text className="font-inter text-xs text-muted truncate">{sub}</Text> : null}
     </View>
   );
 }
 
-function Row({title, sub, action, primary, onPress}) {
+function Row({title, sub, tag, action, primary, onPress}) {
   return onPress ? (
     <View onPress={onPress} className="w-[1150px] flex-row items-center gap-[16px] px-[18px] py-[10px] rounded-xl bg-surface/85 border-[3px] border-line focused:border-accent">
-      <RowText title={title} sub={sub} />
+      <RowText title={title} sub={sub} tag={tag} />
       {action ? (
         <View className={primary ? 'px-[18px] py-[6px] rounded-lg bg-accent' : 'px-[18px] py-[6px] rounded-lg bg-raised'}>
           <Text className={primary ? 'font-inter text-sm font-bold text-ink' : 'font-inter text-sm text-text'}>{action}</Text>
@@ -552,11 +559,13 @@ function Row({title, sub, action, primary, onPress}) {
     </View>
   ) : (
     <View focusable className="w-[1150px] flex-row items-center gap-[16px] px-[18px] py-[10px] rounded-xl bg-surface/85 border-[3px] border-line focused:border-text">
-      <RowText title={title} sub={sub} />
+      <RowText title={title} sub={sub} tag={tag} />
       {action ? <Text className="font-inter text-sm text-faint">{action}</Text> : null}
     </View>
   );
 }
+
+const dlcDone = game => (game.dlc || []).filter(d => d.installed).length;
 
 // where a DLC install is; the PC copies the package over and installs it
 function dlcLine(p) {
@@ -581,16 +590,18 @@ function DLCSection({game, progress, installs, startDLC, say, ask}) {
   };
   return (
     <View scrollAnchor className="gap-[10px] pt-[26px] px-[64px]">
-      <Heading title="DLC" note={`${list.length} on your PC`} pad={0} />
+      <Heading title="DLC" note={`${list.length} on your PC${dlcDone(game) ? ` · ${dlcDone(game)} installed` : ''}`} pad={0} />
       {list.map(d => {
         const line = dlcLine(progress[installs[d.key]]);
-        const sub = [d.kind, size(d.size), line.text, d.pkg ? '' : 'Only .pkg DLC installs from here'].filter(Boolean).join('   ·   ');
+        const on = d.installed || !!line.done;
+        const sub = [d.kind, size(d.size), line.done ? '' : line.text, d.pkg || on ? '' : 'Only .pkg DLC installs from here'].filter(Boolean).join('   ·   ');
+        const tag = line.busy ? '' : on ? 'INSTALLED' : '';
         return d.pkg && !line.busy ? (
-          <Row key={d.key} title={d.name} sub={sub} action={line.done ? 'Install again' : 'Install'} primary={!line.done}
+          <Row key={d.key} title={d.name} sub={sub} tag={tag} action={on ? 'Reinstall' : 'Install'} primary={!on}
             onPress={() => ask({title: `Install ${d.name}?`, yes: 'Install', onYes: () => install(d),
               body: 'Your PC copies the package to the PS5 and installs it. You can leave this page; the progress shows here and on the PC.'})} />
         ) : (
-          <Row key={d.key} title={d.name} sub={sub} action={line.busy ? 'Installing…' : 'Can’t install'} />
+          <Row key={d.key} title={d.name} sub={sub} tag={tag} action={line.busy ? 'Installing…' : on ? '' : 'Can’t install'} />
         );
       })}
     </View>

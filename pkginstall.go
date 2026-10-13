@@ -305,6 +305,7 @@ func (a *App) pkgInstallByLoader(j *BuildJob, host string, ftpPort int, elf []by
 		line = strings.TrimSpace(line)
 		switch {
 		case line == "ok":
+			go a.refreshAddcont() // so it shows as installed
 			return "Installed in " + fmtDur(time.Since(start)), nil
 		case strings.HasPrefix(line, "fail "):
 			msg := strings.TrimSpace(strings.TrimPrefix(line, "fail "))

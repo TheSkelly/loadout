@@ -725,6 +725,7 @@ func (a *App) ps5Loop() {
 	time.Sleep(time.Second)
 	for {
 		a.refreshPS5()
+		a.refreshAddcont()
 		a.autoUpdatePS5App()
 		time.Sleep(60 * time.Second)
 	}

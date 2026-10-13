@@ -137,11 +137,66 @@ type storeGame struct {
 
 // storeDLC is one piece of a game's DLC; PKG files can be installed from the PS5.
 type storeDLC struct {
-	Key  string `json:"key"` // its path on this PC
-	Name string `json:"name"`
-	Kind string `json:"kind"`
-	Size int64  `json:"size"`
-	Pkg  bool   `json:"pkg"`
+	Key       string `json:"key"` // its path on this PC
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	Size      int64  `json:"size"`
+	Pkg       bool   `json:"pkg"`
+	Installed bool   `json:"installed"` // it's installed on the PS5
+}
+
+// The PS5 keeps installed DLC in /user/addcont/<title ID>/<label>, the label
+// being the last part of its content ID (UP9000-PPSA03671_00-<LABEL>).
+// refreshAddcont reads that, about once a minute and after an install.
+func (a *App) refreshAddcont() {
+	host, port, _ := a.ps5()
+	a.mu.Lock()
+	online := a.ps5info.Online
+	a.mu.Unlock()
+	if host == "" || !online {
+		return
+	}
+	f, err := ftpDial(host, port)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	titles, err := f.list("/user/addcont")
+	if err != nil {
+		return
+	}
+	found := map[string]map[string]bool{}
+	for _, t := range titles {
+		if !t.IsDir || !titleIDRe.MatchString(t.Name) {
+			continue
+		}
+		labels, err := f.list("/user/addcont/" + t.Name)
+		if err != nil {
+			continue
+		}
+		for _, l := range labels {
+			if l.IsDir && l.Name != "." && l.Name != ".." {
+				if found[t.Name] == nil {
+					found[t.Name] = map[string]bool{}
+				}
+				found[t.Name][strings.ToUpper(l.Name)] = true
+			}
+		}
+	}
+	a.mu.Lock()
+	a.addcont = found
+	a.mu.Unlock()
+}
+
+// dlcOnPS5 says whether a DLC (by its content ID, or a file name holding it)
+// is installed on the PS5.
+func dlcOnPS5(installed map[string]map[string]bool, ids ...string) bool {
+	for _, id := range ids {
+		if m := contentIDRe.FindStringSubmatch(strings.ToUpper(id)); m != nil && installed[m[2]][m[4]] {
+			return true
+		}
+	}
+	return false
 }
 
 func itemDLC(it Item) []DLC {
@@ -200,7 +255,7 @@ func pkgsIn(dir string) []DLC {
 // storeDLCFor lists a game's DLC for the PS5. A DLC folder that holds .pkg
 // files (a few levels down at most) is listed as those packages, since a
 // package is what the PS5 can install.
-func storeDLCFor(it Item) []storeDLC {
+func storeDLCFor(it Item, installed map[string]map[string]bool) []storeDLC {
 	game := it.Name
 	if game == "" {
 		game = it.Current
@@ -220,19 +275,21 @@ func storeDLCFor(it Item) []storeDLC {
 	out := []storeDLC{}
 	for _, d := range itemDLC(it) {
 		if strings.HasPrefix(d.Kind, "PKG") {
-			out = append(out, storeDLC{Key: d.Path, Name: named(d), Kind: d.Kind, Size: d.Size, Pkg: true})
+			out = append(out, storeDLC{Key: d.Path, Name: named(d), Kind: d.Kind, Size: d.Size, Pkg: true,
+				Installed: dlcOnPS5(installed, d.ContentID, filepath.Base(d.Path))})
 			continue
 		}
 		var pkgs []storeDLC
 		if d.Kind == "Folder" {
 			for _, x := range pkgsIn(d.Path) {
-				pkgs = append(pkgs, storeDLC{Key: x.Path, Name: named(x), Kind: x.Kind, Size: x.Size, Pkg: true})
+				pkgs = append(pkgs, storeDLC{Key: x.Path, Name: named(x), Kind: x.Kind, Size: x.Size, Pkg: true,
+					Installed: dlcOnPS5(installed, x.ContentID, filepath.Base(x.Path))})
 			}
 		}
 		if len(pkgs) > 0 {
 			out = append(out, pkgs...)
 		} else if d.Size > 0 {
-			out = append(out, storeDLC{Key: d.Path, Name: named(d), Kind: d.Kind, Size: d.Size})
+			out = append(out, storeDLC{Key: d.Path, Name: named(d), Kind: d.Kind, Size: d.Size, Installed: dlcOnPS5(installed, d.ContentID, d.File)})
 		}
 	}
 	return out
@@ -344,7 +401,7 @@ func (a *App) storeGamesLocked() []storeGame {
 		if g.Shots > 0 {
 			g.Lib = it.LibKey
 		}
-		g.DLC = storeDLCFor(it)
+		g.DLC = storeDLCFor(it, a.addcont)
 		games = append(games, g)
 	}
 	sort.Slice(games, func(i, j int) bool { return strings.ToLower(games[i].Name) < strings.ToLower(games[j].Name) })
@@ -416,7 +473,7 @@ func (a *App) storeDLCInstall(game, file string) (map[string]string, error) {
 		if it.Key != game {
 			continue
 		}
-		for _, d := range storeDLCFor(it) {
+		for _, d := range storeDLCFor(it, nil) {
 			if d.Key != file {
 				continue
 			}

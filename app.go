@@ -151,6 +151,7 @@ type App struct {
 	toast       []string
 	sent        map[string]SentInfo // image file name -> where it was sent
 	ps5info     PS5Info
+	addcont     map[string]map[string]bool // DLC installed on the PS5: title ID -> content labels
 	saves       SavesInfo
 	uploads     map[string][]UploadGroup // PS5 folder -> what each upload put there
 	ps5gen      int                      // bumps when the PS5 address changes

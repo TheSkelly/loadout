@@ -39,3 +39,13 @@ func TestScanRoms(t *testing.T) {
 		t.Errorf("switch games = %+v", sw)
 	}
 }
+
+func TestDLCOnPS5(t *testing.T) {
+	on := map[string]map[string]bool{"PPSA03671": {"MWOLVDDEBONUS000": true}}
+	if !dlcOnPS5(on, "", "UP9000-PPSA03671_00-MWOLVDDEBONUS000.pkg") || !dlcOnPS5(on, "UP9000-PPSA03671_00-MWOLVDDEBONUS000") {
+		t.Error("an installed DLC isn't seen as installed")
+	}
+	if dlcOnPS5(on, "UP9000-PPSA03671_00-MWOLVPREORDER000", "x.pkg") || dlcOnPS5(nil, "UP9000-PPSA03671_00-MWOLVDDEBONUS000") {
+		t.Error("a DLC that isn't installed is seen as installed")
+	}
+}
