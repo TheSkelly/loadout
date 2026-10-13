@@ -114,6 +114,7 @@ export const api = {
   saveRestore: backup => call(`${base}/s/saves/restore`, {body: {Backup: backup}}),
   roms: () => call(`${base}/s/roms`, {maxBytes: 4 * 1024 * 1024}),
   romGet: key => call(`${base}/s/roms/get`, {body: {Key: key}}),
+  appUpdate: () => call(`${base}/s/app/update`, {body: {}}),
 };
 
 // art is a picture URL; pictures can't carry headers, so the token rides along.

@@ -6,7 +6,7 @@
 //
 // Built with PS5 React (GPL-3.0-or-later); see NOTICE in the app folder.
 import {memo, useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {AppRegistry, View, Text, Image, ScrollView, VirtualList, FocusScope, useIsFocused, useController} from '@ps5-react/core';
+import {AppRegistry, View, Text, Image, ScrollView, VirtualList, FocusScope, useIsFocused, useController, FileSystem, BackHandler} from '@ps5-react/core';
 import {loadConfig, connect, api, art} from './api.js';
 import logo from './assets/logo.png';
 
@@ -36,6 +36,21 @@ const when = iso => {
   return `${MON[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}  ${h % 12 || 12}:${m < 10 ? '0' : ''}${m} ${h < 12 ? 'AM' : 'PM'}`;
 };
 const byName = (a, b) => a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1;
+const sleep = ms => new Promise(done => setTimeout(done, ms));
+
+// Each build of the app carries a stamp file (Loadout writes it). The PS5
+// resumes a suspended app instead of starting it again, so an update on disk
+// can sit unused: the app compares the build it started as with the one on
+// the PC and offers to update and restart.
+const STAMP = `${FileSystem.appDir}/zz-loadout-build.txt`;
+const readStamp = () => {
+  try {
+    return String(FileSystem.readFile(STAMP)).trim();
+  } catch (err) {
+    return '';
+  }
+};
+const LAUNCHED = readStamp();
 
 // ---------- small pieces ----------
 
@@ -281,7 +296,7 @@ function Tab({label, on, onPress}) {
   );
 }
 
-function TopBar({tab, setTab, status}) {
+function TopBar({tab, setTab, status, update}) {
   return (
     <View className="flex-row items-center px-[48px] pt-[22px] gap-[16px]">
       <Logo />
@@ -293,8 +308,17 @@ function TopBar({tab, setTab, status}) {
       </FocusScope>
       <Text className="font-inter text-xs text-faint">L1 / R1</Text>
       <View className="flex-1" />
+      {update ? (
+        <View className="flex-row items-center gap-[8px] px-[14px] py-[6px] rounded-full bg-accent">
+          <Text className="font-inter text-sm font-bold text-ink">Update ready</Text>
+          <Text className="font-inter text-xs text-ink">Press Triangle</Text>
+        </View>
+      ) : null}
       <Activity status={status} />
-      {status && status.pc ? <Text className="font-inter text-sm text-muted">{status.pc}</Text> : null}
+      <View className="items-end">
+        {status && status.pc ? <Text className="font-inter text-sm text-muted">{status.pc}</Text> : null}
+        {LAUNCHED ? <Text className="font-inter text-xs text-faint">{`Build ${LAUNCHED.slice(0, 7)}`}</Text> : null}
+      </View>
     </View>
   );
 }
@@ -439,17 +463,21 @@ function Emulators({progress, onPick}) {
   );
 }
 
-function Home({games, status, progress, onOpen, onPickRom, tab, setTab}) {
+function Home({games, status, progress, onOpen, onPickRom, tab, setTab, update, onUpdate}) {
   const flip = useCallback(action => {
+    if (action === 'triangle' && update) {
+      onUpdate();
+      return true;
+    }
     if (action !== 'l1' && action !== 'r1') return false;
     setTab(t => t === 'games' ? 'emu' : 'games');
     return true;
-  }, [setTab]);
+  }, [setTab, update, onUpdate]);
   return (
     <FocusScope onAction={flip}>
       <View className="w-screen h-screen bg-ink">
         {tab === 'games' ? <BackdropFor games={games} /> : <View className="absolute left-0 top-0 w-screen h-[330px] bg-gradient-to-br from-ink2 via-ink to-black" />}
-        <TopBar tab={tab} setTab={setTab} status={status} />
+        <TopBar tab={tab} setTab={setTab} status={status} update={update} />
         {tab === 'games'
           ? <Games key="games" games={games} progress={progress} onOpen={onOpen} />
           : <Emulators key="emu" progress={progress} onPick={onPickRom} />}
@@ -727,6 +755,8 @@ function App() {
   const [drive, setDrive] = useState('');
   const [message, setMessage] = useState(null);
   const [romNote, setRomNote] = useState(null);
+  const [pcBuild, setPcBuild] = useState('');
+  const [updating, setUpdating] = useState(null);
   const gamesAt = useRef(0);
   const wasBusy = useRef(new Set());
   const working = useRef(false); // the PC is building or sending: poll faster
@@ -739,6 +769,7 @@ function App() {
     }
     try {
       const hello = await connect();
+      setPcBuild(hello.appBuild || '');
       setPhase({kind: 'starting', text: `Loading your games from ${hello.pc || 'your PC'}…`});
       const [g, s] = await Promise.all([api.games(), api.status()]);
       setGames((g.games || []).sort(byName));
@@ -790,6 +821,33 @@ function App() {
   const openGame = useCallback(key => { setMessage(null); setOpen(key); }, []);
   const back = useCallback(() => setOpen(null), []);
   const pickRom = useCallback(r => { setRomNote(null); setRom(r); }, []);
+
+  // the PC has a newer build of this app: get it now, then restart into it
+  const update = !!pcBuild && !!LAUNCHED && pcBuild !== LAUNCHED;
+  const startUpdate = useCallback(async () => {
+    setUpdating({text: 'Getting the update from your PC…'});
+    try {
+      if (readStamp() !== pcBuild) {
+        const r = await api.appUpdate();
+        if (r.data && r.data.state === 'no') throw new Error("Your PC couldn't send the update. Reinstall the app from Loadout's phone page or Settings.");
+        for (let i = 0; i < 300 && readStamp() !== pcBuild; i++) {
+          await sleep(1000);
+          const s = await api.status().catch(() => null);
+          const p = s && s.games && s.games['app:update'];
+          if (p && p.state === 'failed') throw new Error(`The update didn't arrive: ${p.note}`);
+          setUpdating({text: `Updating Loadout${p && p.pct ? ` ${Math.floor(p.pct / 10)}%` : '…'}`});
+        }
+        if (readStamp() !== pcBuild) throw new Error('The update is taking too long. Try again in a moment.');
+      }
+      setUpdating({text: 'Restarting Loadout…'});
+      await sleep(300);
+      if (!BackHandler.exitApp({relaunch: true})) {
+        setUpdating({text: 'Updated. Close Loadout (Options › Close Application) and open it again.', done: true});
+      }
+    } catch (err) {
+      setUpdating({text: err.message, bad: true});
+    }
+  }, [pcBuild]);
 
   // DLC installs run on the PC; this remembers which job is each DLC's latest
   const [installs, setInstalls] = useState({});
@@ -855,7 +913,8 @@ function App() {
   return (
     <View className="w-screen h-screen bg-ink">
       <FocusScope inert={!!game || !!rom}>
-        <Home games={games} status={status} progress={progress} onOpen={openGame} onPickRom={pickRom} tab={tab} setTab={setTab} />
+        <Home games={games} status={status} progress={progress} onOpen={openGame} onPickRom={pickRom} tab={tab} setTab={setTab}
+          update={update && !updating} onUpdate={startUpdate} />
       </FocusScope>
       {game ? (
         <View className="absolute inset-0">
@@ -867,6 +926,15 @@ function App() {
         <Confirm title={`Download ${rom.name}?`} yes="Download"
           body={`It goes to ${rom.emu} on this PS5 (${rom.system}, ${size(rom.size) || 'folder'}).${romNote ? `\n\n${romNote.text}` : ''}`}
           onYes={() => getRom(rom)} onClose={() => setRom(null)} />
+      ) : null}
+      {updating ? (
+        <FocusScope autoFocus trap onBack={() => { if (updating.bad || updating.done) setUpdating(null); return true; }}>
+          <View focusable className="absolute inset-0 w-screen h-screen bg-black/80 items-center justify-center gap-[18px]">
+            <Logo big />
+            <Text className={`${T} text-xl font-bold text-center w-[900px]`} style={updating.bad ? {color: C.coral} : undefined}>{updating.text}</Text>
+            {updating.bad || updating.done ? <Text className="font-inter text-sm text-muted">Circle to go back</Text> : null}
+          </View>
+        </FocusScope>
       ) : null}
       {romNote && !rom ? (
         <View className="absolute bottom-[28px] left-[48px] px-[18px] py-[10px] rounded-xl bg-surface border border-line">
