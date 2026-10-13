@@ -35,6 +35,7 @@ type Settings struct {
 	MoreFolders  []string `json:",omitempty"` // more folders with games, scanned along with Folder
 	WatchFolder  string   `json:",omitempty"` // downloads folder checked for PS5 games in archives
 	WatchOn      *bool    `json:",omitempty"`
+	AutoSendRoms bool     `json:",omitempty"` // Switch games from the downloads folder go on to ProsperoEden on the PS5
 	WatchRecycle bool     `json:",omitempty"` // send the archives to the Recycle Bin once extracted
 	ShowMissing  bool
 	Ignored      []string
@@ -1697,6 +1698,9 @@ func (a *App) handler() http.Handler {
 		}
 		if v := flag("watchRecycle"); v != nil {
 			a.cfg.WatchRecycle = *v
+		}
+		if v := flag("autoSendRoms"); v != nil {
+			a.cfg.AutoSendRoms = *v
 		}
 		if v := flag("ps5AppAuto"); v != nil {
 			a.cfg.PS5AppAuto = v

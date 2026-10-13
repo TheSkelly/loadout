@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 )
@@ -161,5 +162,32 @@ func TestCheckDownloadsSwitch(t *testing.T) {
 	}
 	if !fileExists(filepath.Join(dl, "Pokemon [0100000011D90000][v0].nsp")) {
 		t.Error("the downloaded file was taken away")
+	}
+}
+
+func TestAutoSendRoms(t *testing.T) {
+	if sevenZip() == "" {
+		t.Skip("7-Zip isn't installed")
+	}
+	dl, roms := t.TempDir(), t.TempDir()
+	old := time.Now().Add(-time.Hour)
+	p := filepath.Join(dl, "Pokemon [0100000011D90000][v0].nsp")
+	os.WriteFile(p, []byte("nsp"), 0644)
+	os.Chtimes(p, old, old)
+	a := &App{cfg: Settings{WatchFolder: dl, Folder: t.TempDir(), RomFolder: roms, PS5IP: "192.0.2.1", AutoSendRoms: true},
+		lib: &Library{Games: map[string]*LibEntry{}}, scanning: true}
+	a.ps5cond = sync.NewCond(&a.mu) // no lane runs here: the send just waits in the queue
+	a.checkDownloads()
+	var queued *BuildJob
+	for _, j := range a.ps5q {
+		if j.Key == "rom:Switch/Pokemon [0100000011D90000][v0].nsp" {
+			queued = j
+		}
+	}
+	if queued == nil {
+		t.Fatalf("the new Switch game wasn't queued for the PS5; queue = %d, toasts = %v", len(a.ps5q), a.toast)
+	}
+	if queued.Dest != "/data/prosperoeden/roms" || queued.Kind != "fxup" {
+		t.Errorf("queued to %s as %s", queued.Dest, queued.Kind)
 	}
 }

@@ -610,6 +610,7 @@ func (a *App) fileSwitchGame(src, roms string) string {
 	a.watch.Done = append(a.watch.Done, filepath.Base(src))
 	a.notify("Added %s from your downloads folder to the ROM library.", filepath.Base(src))
 	a.mu.Unlock()
+	a.autoSendRom(dir, filepath.Base(src))
 	return "added to the ROM library"
 }
 
@@ -633,17 +634,40 @@ func (a *App) extractSwitch(tool string, s archiveSet, size int64, roms string) 
 	if len(found) == 0 {
 		return a.extractFailed(name, tmp, "there's no Switch game file (.nsp, .xci) in it")
 	}
+	var moved []string
 	for _, f := range found {
 		if err := os.Rename(f, filepath.Join(dir, filepath.Base(f))); err != nil {
 			return a.extractFailed(name, tmp, "couldn't move it into the ROM library: "+err.Error())
 		}
+		moved = append(moved, filepath.Base(f))
 	}
 	os.RemoveAll(tmp)
 	romMu.Lock()
 	romAt = time.Time{}
 	romMu.Unlock()
 	a.extracted(name, "the ROM library", s.parts)
+	for _, f := range moved {
+		a.autoSendRom(dir, f)
+	}
 	return "extracted to the ROM library"
+}
+
+// autoSendRom sends a Switch game just added to the ROM library on to
+// ProsperoEden on the PS5, when that's switched on. The send is queued like
+// one started from the PS5 app; if the PS5 is off it fails and says so, and
+// the game can be sent from the PS5 app later.
+func (a *App) autoSendRom(dir, file string) {
+	a.mu.Lock()
+	on := a.cfg.AutoSendRoms && strings.TrimSpace(a.cfg.PS5IP) != ""
+	a.mu.Unlock()
+	if !on {
+		return
+	}
+	if _, err := a.startRomGet(filepath.Base(dir) + "/" + file); err != nil {
+		a.mu.Lock()
+		a.notify("%s is in the ROM library but couldn't be sent to the PS5: %v", file, err)
+		a.mu.Unlock()
+	}
 }
 
 func (a *App) extractFailed(name, tmp, why string) string {

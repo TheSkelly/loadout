@@ -1062,7 +1062,7 @@ function renderRemote() {
   { // the downloads folder
     const w = S.watch || {};
     $("#watchFolder").value = S.settings.WatchFolder || "";
-    $("#watchOn").checked = S.settings.WatchOn !== false; $("#watchRecycle").checked = !!S.settings.WatchRecycle;
+    $("#watchOn").checked = S.settings.WatchOn !== false; $("#watchRecycle").checked = !!S.settings.WatchRecycle; $("#autoSendRoms").checked = !!S.settings.AutoSendRoms;
     $("#watchOn").disabled = $("#watchCheck").disabled = $("#watchClear").disabled = !S.settings.WatchFolder;
     const lines = [];
     if (w.noTool) lines.push(`<p class="warnline">7-Zip isn't installed on this PC. Install it from 7-zip.org and Loadout uses it by itself.</p>`);
@@ -1448,6 +1448,7 @@ $("#watchClear").onclick = () => act("watch/folder", { Path: "" }, "Loadout no l
 $("#watchCheck").onclick = () => act("watch/check", {}, "Checking the downloads folder…");
 $("#watchOn").onchange = e => act("settings", { watchOn: e.target.checked });
 $("#watchRecycle").onchange = e => act("settings", { watchRecycle: e.target.checked });
+$("#autoSendRoms").onchange = e => act("settings", { autoSendRoms: e.target.checked });
 $("#rescan").onclick = () => act("scan", {});
 $("#q").oninput = () => renderLibrary();
 $("#pattern").oninput = savePattern;
