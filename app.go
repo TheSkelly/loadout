@@ -66,7 +66,8 @@ type Settings struct {
 	RemoteOn     bool
 	RemotePort   int
 	RemotePIN    string
-	AlertNtfy    string // ntfy topic or full URL
+	StoreDevices []StoreDevice `json:",omitempty"` // PS5 apps paired with the PIN
+	AlertNtfy    string        // ntfy topic or full URL
 	AlertDiscord string // Discord webhook URL
 	KeepAwake    *bool  // keep the PC awake while jobs run
 	CloseToTray  *bool  // closing the window hides it in the tray
@@ -1550,6 +1551,11 @@ func (a *App) handler() http.Handler {
 			if a.cfg.RemotePort < 1024 || a.cfg.RemotePort > 65535 {
 				a.cfg.RemotePort = defaultRemotePort
 			}
+		}
+		if v, ok := b["forgetDevice"]; ok {
+			var id string
+			json.Unmarshal(v, &id)
+			a.forgetStoreDeviceLocked(id)
 		}
 		if _, pinSet := b["remotePin"]; a.cfg.RemoteOn != oldOn || a.cfg.RemotePort != oldRPort || (pinSet && a.cfg.RemoteOn && a.remote == nil) {
 			go a.applyRemote()

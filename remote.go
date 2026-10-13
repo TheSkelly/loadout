@@ -37,10 +37,12 @@ type RemoteInfo struct {
 	Tailscale string   `json:"tailscale"` // the Tailscale address, if this PC has one
 	Err       string   `json:"err"`
 	HasPIN    bool     `json:"hasPin"`
+	Devices   []StoreDeviceView `json:"devices"` // PS5 apps paired with the PIN
 }
 
 type remoteServer struct {
 	srv   *http.Server
+	disc  net.PacketConn // answers the PS5 app looking for Loadout; nil if the port was taken
 	port  int
 	token string // session cookie value, new each time the server starts
 
@@ -82,7 +84,8 @@ func localAddrs() (all []string, tailscale string) {
 }
 
 func (a *App) remoteInfoLocked() RemoteInfo {
-	ri := RemoteInfo{On: a.cfg.RemoteOn, Port: a.cfg.RemotePort, Err: a.remoteErr, HasPIN: len(a.cfg.RemotePIN) >= 4, URLs: []string{}}
+	ri := RemoteInfo{On: a.cfg.RemoteOn, Port: a.cfg.RemotePort, Err: a.remoteErr, HasPIN: len(a.cfg.RemotePIN) >= 4, URLs: []string{},
+		Devices: a.storeDeviceViewsLocked()}
 	if ri.Port == 0 {
 		ri.Port = defaultRemotePort
 	}
@@ -114,6 +117,9 @@ func (a *App) applyRemote() {
 	a.remote, a.remoteErr = nil, ""
 	a.mu.Unlock()
 	if old != nil {
+		if old.disc != nil {
+			old.disc.Close()
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		old.srv.Shutdown(ctx)
 		cancel()
@@ -136,6 +142,10 @@ func (a *App) applyRemote() {
 	}
 	rs := &remoteServer{port: port, token: randHex(24)}
 	rs.srv = &http.Server{Handler: a.remoteHandler(rs), ReadHeaderTimeout: 10 * time.Second}
+	if pc, err := net.ListenPacket("udp4", ":"+strconv.Itoa(port)); err == nil {
+		rs.disc = pc // without it the PS5 app can still be given the address by hand
+		go serveDiscovery(pc, port)
+	}
 	a.mu.Lock()
 	a.remote = rs
 	a.mu.Unlock()
@@ -305,6 +315,34 @@ func (a *App) remoteStateLocked() remoteState {
 	return rs
 }
 
+// checkRemotePIN checks a PIN typed on the phone page or in the PS5 app.
+// Five wrong tries in a row lock both out for 5 minutes. It returns 200 when
+// the PIN is right, otherwise the HTTP status and what to tell the person.
+func (a *App) checkRemotePIN(rs *remoteServer, typed string) (int, string) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if time.Now().Before(rs.lockedTo) {
+		left := time.Until(rs.lockedTo).Round(time.Second)
+		return 429, fmt.Sprintf("Too many wrong PINs. Try again in %s.", fmtDur(left))
+	}
+	a.mu.Lock()
+	pin := a.cfg.RemotePIN
+	a.mu.Unlock()
+	if len(pin) < 4 || subtle.ConstantTimeCompare([]byte(strings.TrimSpace(typed)), []byte(pin)) != 1 {
+		rs.fails++
+		msg := "Wrong PIN."
+		if rs.fails >= 5 {
+			rs.fails = 0
+			rs.lockedTo = time.Now().Add(5 * time.Minute)
+			msg = "Too many wrong PINs. Locked for 5 minutes."
+		}
+		time.Sleep(600 * time.Millisecond)
+		return 401, msg
+	}
+	rs.fails = 0
+	return 200, ""
+}
+
 func (a *App) remoteHandler(rs *remoteServer) http.Handler {
 	mux := http.NewServeMux()
 	writeJSON := func(w http.ResponseWriter, code int, v any) {
@@ -358,31 +396,10 @@ func (a *App) remoteHandler(rs *remoteServer) http.Handler {
 		}
 		var b struct{ PIN string }
 		json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&b)
-		rs.mu.Lock()
-		if time.Now().Before(rs.lockedTo) {
-			left := time.Until(rs.lockedTo).Round(time.Second)
-			rs.mu.Unlock()
-			writeJSON(w, 429, map[string]any{"error": fmt.Sprintf("Too many wrong PINs. Try again in %s.", fmtDur(left))})
+		if code, msg := a.checkRemotePIN(rs, b.PIN); code != 200 {
+			writeJSON(w, code, map[string]any{"error": msg})
 			return
 		}
-		a.mu.Lock()
-		pin := a.cfg.RemotePIN
-		a.mu.Unlock()
-		if len(pin) < 4 || subtle.ConstantTimeCompare([]byte(strings.TrimSpace(b.PIN)), []byte(pin)) != 1 {
-			rs.fails++
-			msg := "Wrong PIN."
-			if rs.fails >= 5 {
-				rs.fails = 0
-				rs.lockedTo = time.Now().Add(5 * time.Minute)
-				msg = "Too many wrong PINs. The page is locked for 5 minutes."
-			}
-			rs.mu.Unlock()
-			time.Sleep(600 * time.Millisecond)
-			writeJSON(w, 401, map[string]any{"error": msg})
-			return
-		}
-		rs.fails = 0
-		rs.mu.Unlock()
 		http.SetCookie(w, &http.Cookie{Name: "tt_remote", Value: rs.token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 30 * 24 * 3600})
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
@@ -485,6 +502,7 @@ func (a *App) remoteHandler(rs *remoteServer) http.Handler {
 		a.stopLane(b.Lane)
 		return nil, nil
 	}))
+	a.storeRoutes(mux, rs, writeJSON, authed)
 	return mux
 }
 

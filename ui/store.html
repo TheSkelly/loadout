@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0E1420">
+<title>Loadout Store</title>
+<!--
+  The Loadout store, laid out for a TV and a controller. This page is the
+  working model for the PS5 app: it uses the same /s/ API the app will
+  (pair with the PIN, keep the token, list games, ask for one, watch progress).
+  Arrow keys / d-pad move, Enter / Cross picks, Escape / Circle goes back.
+-->
+<style>
+:root { --ink:#0E1420; --ink2:#131B29; --surface:#182131; --raised:#22304A; --line:#2C3A55; --text:#E7ECF5; --muted:#8C9AB3; --faint:#5E6B84; --manila:#E9C46A; --mint:#5BC8A0; --coral:#EF6F6C; --sky:#59B8F0; color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--ink); color: var(--text); font: 18px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; overflow-x: hidden; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+:focus { outline: none; }
+[hidden] { display: none !important; }
+
+/* top bar */
+header { display: flex; align-items: center; gap: 14px; padding: 28px 64px 8px; }
+header svg { width: 40px; height: 40px; }
+header b { font-size: 28px; letter-spacing: .01em; }
+header .st { margin-left: auto; color: var(--muted); font-size: 16px; display: flex; gap: 22px; align-items: center; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--faint); display: inline-block; margin-right: 8px; }
+.dot.on { background: var(--mint); } .dot.off { background: var(--coral); }
+
+/* activity strip */
+#activity { margin: 10px 64px 0; padding: 14px 20px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); display: flex; gap: 28px; }
+#activity .lane { flex: 1; min-width: 0; }
+#activity .what { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; font-size: 16px; }
+#activity .sub { color: var(--muted); font-size: 14px; }
+.track { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin: 8px 0 6px; }
+.track i { display: block; height: 100%; width: 0; background: var(--manila); transition: width .5s; }
+.track.ps5 i { background: var(--sky); }
+
+/* shelves */
+main { padding: 8px 0 80px; }
+.shelf h2 { margin: 30px 64px 12px; font-size: 22px; font-weight: 600; }
+.shelf h2 small { color: var(--faint); font-weight: 400; font-size: 16px; margin-left: 10px; }
+.row { display: flex; gap: 22px; overflow-x: auto; padding: 10px 64px 18px; scroll-behavior: smooth; scrollbar-width: none; }
+.row::-webkit-scrollbar { display: none; }
+.tile { flex: none; width: 210px; text-align: left; border-radius: 16px; transition: transform .15s; }
+.tile .art { width: 210px; height: 210px; border-radius: 16px; background: var(--raised) center/cover no-repeat; position: relative; border: 3px solid transparent; transition: border-color .15s, box-shadow .15s; display: grid; place-items: center; color: var(--faint); font-size: 15px; text-align: center; padding: 12px; }
+.tile .art.has { color: transparent; }
+.tile b { display: block; margin-top: 10px; font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile small { color: var(--muted); font-size: 14px; }
+.tile:focus { transform: scale(1.06); }
+.tile:focus .art { border-color: var(--manila); box-shadow: 0 10px 40px rgba(0,0,0,.55); }
+.badge { position: absolute; left: 10px; top: 10px; font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: rgba(14,20,32,.85); color: var(--mint); }
+.badge.ps5 { color: var(--sky); } .badge.run { color: var(--manila); } .badge.bad { color: var(--coral); }
+.tile .bar { position: absolute; left: 10px; right: 10px; bottom: 10px; height: 6px; border-radius: 3px; background: rgba(14,20,32,.8); overflow: hidden; }
+.tile .bar i { display: block; height: 100%; background: var(--manila); }
+.empty { color: var(--muted); padding: 40px 64px; font-size: 18px; }
+
+/* game page */
+#detail { position: fixed; inset: 0; z-index: 10; background: var(--ink) center/cover no-repeat; }
+#detail::before { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(14,20,32,.97) 38%, rgba(14,20,32,.6) 70%, rgba(14,20,32,.35)), linear-gradient(0deg, rgba(14,20,32,1) 0%, rgba(14,20,32,0) 40%); }
+#detail .in { position: relative; padding: 90px 64px; max-width: 980px; display: flex; flex-direction: column; gap: 18px; height: 100%; }
+#detail .head { display: flex; gap: 30px; align-items: flex-end; }
+#detail .cover { width: 220px; height: 220px; border-radius: 18px; background: var(--raised) center/cover no-repeat; flex: none; }
+#detail h1 { font-size: 44px; line-height: 1.1; margin: 0 0 10px; }
+#detail .meta { color: var(--muted); font-size: 17px; display: flex; flex-wrap: wrap; gap: 6px 18px; }
+#detail .desc { color: #C9D2E3; font-size: 17px; max-height: 7.3em; overflow: hidden; }
+#detail .where { color: var(--sky); font-size: 16px; }
+#detail .acts { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.btn { padding: 16px 30px; border-radius: 14px; font-weight: 700; font-size: 18px; background: var(--raised); border: 3px solid transparent; }
+.btn.main { background: var(--manila); color: #3A2E0E; }
+.btn[disabled] { opacity: .45; }
+.btn:focus { border-color: var(--text); box-shadow: 0 0 0 4px rgba(233,196,106,.25); }
+.drive { padding: 12px 18px; border-radius: 12px; background: var(--surface); border: 3px solid var(--line); text-align: left; font-weight: 600; font-size: 16px; }
+.drive small { display: block; color: var(--muted); font-weight: 400; font-size: 13px; }
+.drive.on { border-color: var(--sky); color: var(--sky); }
+.drive:focus { border-color: var(--text); }
+#detail .prog { max-width: 620px; }
+#detail .prog .lbl { font-size: 17px; font-weight: 600; }
+#detail .prog .note { color: var(--muted); font-size: 15px; }
+#detail .msg { min-height: 24px; color: var(--muted); }
+#detail .msg.bad { color: var(--coral); }
+.hintbar { position: fixed; right: 40px; bottom: 26px; color: var(--faint); font-size: 15px; display: flex; gap: 22px; z-index: 11; }
+.hintbar i { font-style: normal; display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--faint); font-size: 13px; margin-right: 6px; }
+
+/* pairing */
+#pair { min-height: 100vh; display: grid; place-items: center; }
+#pair form { width: 520px; text-align: center; }
+#pair svg { width: 80px; height: 80px; }
+#pair h1 { font-size: 34px; margin: 18px 0 6px; }
+#pair p { color: var(--muted); margin: 0 0 26px; }
+#pair input { width: 100%; padding: 20px; border-radius: 16px; border: 3px solid var(--line); background: var(--surface); color: var(--text); font-size: 34px; text-align: center; letter-spacing: .35em; }
+#pair input:focus { border-color: var(--manila); }
+#pair .btn { width: 100%; margin-top: 16px; }
+#pair .err { color: var(--coral); min-height: 28px; margin-top: 14px; }
+
+#toast { position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); background: var(--raised); border: 1px solid var(--line); padding: 14px 24px; border-radius: 14px; z-index: 30; font-size: 17px; }
+#toast.bad { border-color: var(--coral); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><symbol id="logo" viewBox="0 0 32 32"><path d="M5 9.5A2.5 2.5 0 0 1 7.5 7H20l7 9-7 9H7.5A2.5 2.5 0 0 1 5 22.5z" fill="#E9C46A"/><circle cx="10.5" cy="16" r="2" fill="#0E1420"/></symbol></svg>
+
+<div id="pair" hidden>
+  <form id="pairForm">
+    <svg><use href="#logo"/></svg>
+    <h1>Pair with Loadout</h1>
+    <p>Enter the phone remote PIN you set in Loadout on your PC (Settings › Phone remote).</p>
+    <input id="pin" type="password" inputmode="numeric" maxlength="12" autocomplete="off" aria-label="PIN">
+    <button class="btn main" type="submit">Pair</button>
+    <div class="err" id="pairErr"></div>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <svg><use href="#logo"/></svg><b>Loadout</b>
+    <div class="st"><span id="pcName"></span><span id="ps5State"></span></div>
+  </header>
+  <div id="activity" hidden></div>
+  <main id="shelves"></main>
+</div>
+
+<div id="detail" hidden>
+  <div class="in">
+    <div class="head">
+      <div class="cover" id="dCover"></div>
+      <div><h1 id="dName"></h1><div class="meta" id="dMeta"></div></div>
+    </div>
+    <div class="where" id="dWhere"></div>
+    <div class="desc" id="dDesc"></div>
+    <div id="dDrives" class="acts"></div>
+    <div class="acts"><button class="btn main" id="dGet">Send to PS5</button><button class="btn" id="dBack">Back</button></div>
+    <div class="prog" id="dProg" hidden><div class="lbl" id="dProgLbl"></div><div class="track"><i id="dProgBar"></i></div><div class="note" id="dProgNote"></div></div>
+    <div class="msg" id="dMsg"></div>
+  </div>
+</div>
+<div class="hintbar"><span><i>✕</i>Select</span><span><i>○</i>Back</span></div>
+<div id="toast" hidden></div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const size = b => !(b > 0) ? "" : b >= 1e12 ? (b / 1e12).toFixed(2) + " TB" : b >= 1e9 ? (b / 1e9).toFixed(1) + " GB" : Math.round(b / 1e6) + " MB";
+const speed = b => b > 0 ? (b / 1e6).toFixed(0) + " MB/s" : "";
+const dur = s => !(s > 0) ? "" : s >= 3600 ? Math.floor(s / 3600) + " h " + Math.round(s % 3600 / 60) + " min" : s >= 60 ? Math.round(s / 60) + " min" : Math.round(s) + " s";
+
+// ---------- talking to Loadout ----------
+let TOKEN = "";
+try { TOKEN = localStorage.getItem("loadoutToken") || ""; } catch (e) {}
+const saveToken = t => { TOKEN = t; try { t ? localStorage.setItem("loadoutToken", t) : localStorage.removeItem("loadoutToken"); } catch (e) {} };
+
+async function api(path, body) {
+  const r = await fetch(path, { method: body ? "POST" : "GET", headers: Object.assign({ "X-Loadout-Token": TOKEN }, body ? { "Content-Type": "application/json" } : {}), body: body ? JSON.stringify(body) : undefined });
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401 && d.pair) { showPair(); throw new Error("pair"); }
+  if (d.error) throw new Error(d.error);
+  return d;
+}
+const art = (k, f) => k ? `/s/art?k=${encodeURIComponent(k)}&f=${f}&t=${encodeURIComponent(TOKEN)}` : "";
+
+let toastT;
+function toast(msg, bad) { const t = $("#toast"); t.textContent = msg; t.className = bad ? "bad" : ""; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 4200); }
+
+// ---------- pairing ----------
+function showPair() { $("#app").hidden = true; $("#detail").hidden = true; $("#pair").hidden = false; $("#pin").focus(); }
+$("#pairForm").onsubmit = async e => {
+  e.preventDefault();
+  $("#pairErr").textContent = "";
+  try {
+    const r = await fetch("/s/pair", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ PIN: $("#pin").value, Name: "Store page" }) });
+    const d = await r.json();
+    if (!d.token) throw new Error(d.error || "Couldn't pair.");
+    saveToken(d.token); $("#pin").value = ""; $("#pair").hidden = true; start();
+  } catch (err) { $("#pairErr").textContent = err.message; $("#pin").select(); }
+};
+
+// ---------- state ----------
+let GAMES = [], STATUS = null, DRIVE = "", OPEN = null;
+const byKey = k => GAMES.find(g => g.key === k);
+const progOf = g => (STATUS && STATUS.games && STATUS.games[g.key]) || { state: g.state, pct: g.pct, note: g.note };
+const busy = p => p && p.state && !["sent", "failed", ""].includes(p.state);
+const stateWord = { queued: "Waiting", building: "Building on PC", waiting: "Waiting to send", sending: "Sending", sent: "Sent", failed: "Failed" };
+
+async function loadGames() { const d = await api("/s/games"); GAMES = d.games || []; }
+async function loadStatus() { STATUS = await api("/s/status"); if (!DRIVE) DRIVE = STATUS.drive || ""; }
+
+// ---------- home ----------
+function tileHTML(g) {
+  const p = progOf(g);
+  let badge = "";
+  if (busy(p)) badge = `<span class="badge run">${esc(stateWord[p.state] || p.state)}</span>`;
+  else if (p.state === "failed") badge = `<span class="badge bad">Failed</span>`;
+  else if (g.onPs5) badge = `<span class="badge ps5">On PS5</span>`;
+  else if (g.ready) badge = `<span class="badge">Ready</span>`;
+  const bar = busy(p) && p.pct > 0 ? `<span class="bar"><i style="width:${p.pct / 10}%"></i></span>` : "";
+  const img = g.cover ? ` has" style="background-image:url('${art(g.cover, "cover")}')` : "";
+  return `<button class="tile" data-key="${esc(g.key)}"><div class="art${img}">${g.cover ? "" : esc(g.name)}${badge}${bar}</div><b>${esc(g.name)}</b><small>${esc([g.platform, size(g.size)].filter(Boolean).join(" · "))}</small></button>`;
+}
+function shelf(title, list, note) {
+  if (!list.length) return "";
+  return `<section class="shelf"><h2>${esc(title)}${note ? `<small>${esc(note)}</small>` : ""}</h2><div class="row">${list.map(tileHTML).join("")}</div></section>`;
+}
+function renderHome() {
+  const focusKey = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.key : null;
+  const moving = GAMES.filter(g => busy(progOf(g)));
+  const recent = GAMES.filter(g => g.firstSeen).sort((a, b) => b.firstSeen.localeCompare(a.firstSeen)).slice(0, 12);
+  const notOn = GAMES.filter(g => !g.onPs5 && g.canGet);
+  const onPS5 = GAMES.filter(g => g.onPs5);
+  let h = shelf("On the way", moving) + shelf("Recently added", recent) + shelf("Not on your PS5 yet", notOn, notOn.length + " games") + shelf("Already on your PS5", onPS5) + shelf("Everything", GAMES, GAMES.length + " games");
+  if (!GAMES.length) h = `<p class="empty">No games in Loadout yet. Pick your games folder in Loadout on the PC.</p>`;
+  const rows = [...document.querySelectorAll(".row")].map(r => r.scrollLeft);
+  $("#shelves").innerHTML = h;
+  document.querySelectorAll(".row").forEach((r, i) => { if (rows[i]) r.scrollLeft = rows[i]; });
+  if (OPEN) return;
+  let el = focusKey && document.querySelector(`.tile[data-key="${CSS.escape(focusKey)}"]`);
+  (el || document.querySelector(".tile"))?.focus({ preventScroll: !el });
+}
+function renderActivity() {
+  const s = STATUS; if (!s) return;
+  $("#pcName").textContent = s.pc ? "PC: " + s.pc : "";
+  $("#ps5State").innerHTML = !s.hasPs5 ? `<span class="dot off"></span>No PS5 set in Loadout` : `<span class="dot ${s.ps5Online ? "on" : "off"}"></span>PS5 ${s.ps5Online ? "connected" : "not answering"}`;
+  const lane = (l, cls, idle) => `<div class="lane"><div class="what">${esc(l.busy && l.what ? l.what : idle)}</div><div class="track ${cls}"><i style="width:${l.busy ? l.pct / 10 : 0}%"></i></div><div class="sub">${esc([l.busy && l.total ? `${l.done} of ${l.total}` : "", l.busy ? speed(l.speed) : "", l.busy && l.eta ? dur(l.eta) + " left" : ""].filter(Boolean).join(" · "))}</div></div>`;
+  const on = s.build.busy || s.ps5.busy;
+  $("#activity").hidden = !on;
+  if (on) $("#activity").innerHTML = lane(s.build, "", "PC is idle") + lane(s.ps5, "ps5", "Nothing sending");
+}
+
+// ---------- game page ----------
+function openGame(key) {
+  const g = byKey(key); if (!g) return;
+  OPEN = key;
+  $("#detail").style.backgroundImage = g.hero ? `url('${art(g.hero, "hero")}')` : "";
+  $("#dCover").style.backgroundImage = g.cover ? `url('${art(g.cover, "full")}')` : "";
+  $("#dName").textContent = g.name;
+  $("#dMeta").innerHTML = [g.platform, g.version && "v" + g.version, size(g.size), g.publisher, g.release, (g.genres || []).slice(0, 3).join(", "), g.rating ? "★ " + g.rating.toFixed(1) : "", g.id].filter(Boolean).map(t => `<span>${esc(t)}</span>`).join("");
+  $("#dDesc").textContent = g.desc || "";
+  $("#dMsg").textContent = ""; $("#dMsg").className = "msg";
+  renderDetail();
+  $("#detail").hidden = false; $("#app").hidden = true;
+  $("#dGet").disabled ? $("#dBack").focus() : $("#dGet").focus();
+}
+function closeGame() { const k = OPEN; OPEN = null; $("#detail").hidden = true; $("#app").hidden = false; renderHome(); document.querySelector(`.tile[data-key="${CSS.escape(k)}"]`)?.focus(); }
+function renderDetail() {
+  const g = byKey(OPEN); if (!g) return closeGame();
+  const p = progOf(g);
+  $("#dWhere").textContent = g.onPs5 ? "On your PS5: " + g.onPs5 : g.ready ? "Built and ready to send." : "Loadout will build it on the PC first, then send it.";
+  const drives = (STATUS && STATUS.drives) || [];
+  const keep = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.drive : null;
+  $("#dDrives").innerHTML = drives.map(d => `<button class="drive${d.root === DRIVE ? " on" : ""}" data-drive="${esc(d.root)}">${esc(d.short || d.label)}<small>${d.free >= 0 ? size(d.free) + " free" : esc(d.label)}</small></button>`).join("");
+  if (keep) document.querySelector(`.drive[data-drive="${CSS.escape(keep)}"]`)?.focus();
+  const b = busy(p);
+  $("#dGet").disabled = !g.canGet || b;
+  $("#dGet").textContent = b ? stateWord[p.state] + "…" : g.onPs5 ? "Send again" : "Send to PS5";
+  $("#dProg").hidden = !b && p.state !== "sent" && p.state !== "failed";
+  $("#dProgLbl").textContent = stateWord[p.state] || "";
+  $("#dProgBar").style.width = (p.state === "sent" ? 100 : (p.pct || 0) / 10) + "%";
+  $("#dProgNote").textContent = p.note || "";
+  // a button that just got disabled drops focus: keep the controller somewhere useful
+  if (!$("#detail").hidden && !$("#detail").contains(document.activeElement)) ($("#dGet").disabled ? $("#dBack") : $("#dGet")).focus();
+}
+$("#dBack").onclick = closeGame;
+$("#dDrives").addEventListener("click", e => { const d = e.target.closest("[data-drive]"); if (d) { DRIVE = d.dataset.drive; renderDetail(); } });
+$("#dGet").onclick = async () => {
+  const g = byKey(OPEN); if (!g) return;
+  $("#dGet").disabled = true;
+  try {
+    const d = await api("/s/get", { Key: g.key, Drive: DRIVE });
+    $("#dMsg").textContent = (d.data && d.data.msg) || "On its way."; $("#dMsg").className = "msg";
+    await refresh();
+  } catch (err) { if (err.message !== "pair") { $("#dMsg").textContent = err.message; $("#dMsg").className = "msg bad"; } renderDetail(); }
+};
+document.addEventListener("click", e => { const t = e.target.closest(".tile"); if (t) openGame(t.dataset.key); });
+
+// ---------- controller / keyboard ----------
+function visibleFocusables() {
+  const root = OPEN ? $("#detail") : !$("#pair").hidden ? $("#pair") : $("#app");
+  return [...root.querySelectorAll("button:not([disabled]), input")].filter(el => el.offsetParent !== null);
+}
+function move(dir) {
+  const cur = document.activeElement, all = visibleFocusables();
+  if (!all.includes(cur)) { all[0]?.focus(); return; }
+  const a = cur.getBoundingClientRect(), ax = a.left + a.width / 2, ay = a.top + a.height / 2;
+  let best = null, bestScore = Infinity;
+  for (const el of all) {
+    if (el === cur) continue;
+    const b = el.getBoundingClientRect(), bx = b.left + b.width / 2, by = b.top + b.height / 2;
+    const dx = bx - ax, dy = by - ay;
+    const ok = dir === "left" ? dx < -5 : dir === "right" ? dx > 5 : dir === "up" ? dy < -5 : dy > 5;
+    if (!ok) continue;
+    const main = dir === "left" || dir === "right" ? Math.abs(dx) : Math.abs(dy);
+    const side = dir === "left" || dir === "right" ? Math.abs(dy) : Math.abs(dx);
+    const score = main + side * 3;
+    if (score < bestScore) { bestScore = score; best = el; }
+  }
+  if (best) { best.focus({ preventScroll: true }); best.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" }); }
+}
+function back() { if (OPEN) closeGame(); }
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT" && !["ArrowUp", "ArrowDown", "Escape"].includes(e.key)) return;
+  const dirs = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
+  if (dirs[e.key]) { e.preventDefault(); move(dirs[e.key]); }
+  else if (e.key === "Escape" || e.key === "Backspace") { e.preventDefault(); back(); }
+});
+// gamepad: d-pad / left stick move, Cross (0) selects, Circle (1) goes back
+let padPrev = {}, padRepeat = 0;
+function pollPad() {
+  const pad = navigator.getGamepads ? [...navigator.getGamepads()].find(Boolean) : null;
+  if (pad) {
+    const btn = i => pad.buttons[i] && pad.buttons[i].pressed;
+    const ax = pad.axes[0] || 0, ay = pad.axes[1] || 0;
+    const now = { up: btn(12) || ay < -.6, down: btn(13) || ay > .6, left: btn(14) || ax < -.6, right: btn(15) || ax > .6, ok: btn(0), back: btn(1) };
+    const t = performance.now();
+    for (const d of ["up", "down", "left", "right"]) {
+      if (now[d] && (!padPrev[d] || t > padRepeat)) { move(d); padRepeat = t + (padPrev[d] ? 120 : 380); }
+    }
+    if (now.ok && !padPrev.ok) document.activeElement?.click();
+    if (now.back && !padPrev.back) back();
+    padPrev = now;
+  }
+  requestAnimationFrame(pollPad);
+}
+requestAnimationFrame(pollPad);
+
+// ---------- keep it fresh ----------
+let pollT, gamesAt = 0, wasBusy = new Set();
+async function refresh() {
+  try {
+    await loadStatus();
+    // the full list is bigger: reload it now and then, or when a game just finished
+    const nowBusy = new Set(Object.entries(STATUS.games || {}).filter(([, p]) => busy(p)).map(([k]) => k));
+    const finished = [...wasBusy].some(k => !nowBusy.has(k));
+    wasBusy = nowBusy;
+    if (Date.now() - gamesAt > 60000 || finished) { await loadGames(); gamesAt = Date.now(); }
+    renderActivity();
+    if (OPEN) renderDetail(); else if (!$("#app").hidden) renderHome();
+  } catch (err) { if (err.message !== "pair") toast("Can't reach Loadout on the PC: " + err.message, true); }
+}
+function loop() { clearTimeout(pollT); refresh().finally(() => pollT = setTimeout(loop, STATUS && (STATUS.build.busy || STATUS.ps5.busy) ? 1500 : 5000)); }
+
+async function start() {
+  try {
+    const h = await fetch("/s/hello", { headers: { "X-Loadout-Token": TOKEN } }).then(r => r.json());
+    if (!h.paired) return showPair();
+    $("#app").hidden = false;
+    await loadGames(); gamesAt = Date.now();
+    await loadStatus();
+    renderActivity(); renderHome();
+    loop();
+  } catch (err) { if (err.message !== "pair") toast("Can't reach Loadout on the PC.", true); }
+}
+start();
+</script>
+</body>
+</html>

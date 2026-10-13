@@ -1057,6 +1057,10 @@ function renderRemote() {
       ${others.map(u => `<div class="remurl"><span><b>On your home Wi-Fi</b><i>${esc(u)}</i></span><button class="btn ghost sm" data-copyurl="${esc(u)}">Copy</button></div>`).join("")}
       </div><p class="hint2">Open the address in your phone's browser and enter the PIN. If Windows asks about the firewall the first time, choose Allow. This PC has to be on with Loadout running (it can sit in the tray).</p>`;
   } else if (r.on) h = `<p class="hint2">Starting the phone page…</p>`;
+  const devs = r.devices || [];
+  if (devs.length) h += `<h3 style="margin-top:16px">Paired PS5 apps</h3>
+    ${devs.map(d => `<div class="remurl"><span><b>${esc(d.name)}</b><i>Paired ${esc(d.added)}${d.seen ? ` · last used ${esc(d.seen)}` : ""}</i></span><button class="btn ghost sm" data-forget="${esc(d.id)}">Forget</button></div>`).join("")}
+    <p class="hint2">These paired with your PIN and can browse your games and ask for them to be sent. Forget one to make it ask for the PIN again.</p>`;
   $("#remoteInfo").innerHTML = h;
 }
 let PROF = null, profPick = null; // profPick: { uid, path, preview, mode } while choosing a picture
@@ -1471,7 +1475,7 @@ $("#remoteOn").onchange = e => {
 let remTimer;
 const saveRemote = () => { clearTimeout(remTimer); remTimer = setTimeout(() => act("settings", { remotePin: $("#remotePin").value.trim(), remotePort: +$("#remotePort").value || 8787 }), 600); };
 $("#remotePin").oninput = saveRemote; $("#remotePort").oninput = saveRemote;
-$("#remoteInfo").addEventListener("click", e => { const b = e.target.closest("[data-copyurl]"); if (b) act("copy", { text: b.dataset.copyurl }, "Copied. Paste it into your phone's browser."); });
+$("#remoteInfo").addEventListener("click", e => { const f = e.target.closest("[data-forget]"); if (f) { act("settings", { forgetDevice: f.dataset.forget }, "Forgotten. That device will need the PIN again."); return; } const b = e.target.closest("[data-copyurl]"); if (b) act("copy", { text: b.dataset.copyurl }, "Copied. Paste it into your phone's browser."); });
 let alertTimer;
 const saveAlerts = () => { clearTimeout(alertTimer); alertTimer = setTimeout(() => act("settings", { alertNtfy: $("#alertNtfy").value.trim(), alertDiscord: $("#alertDiscord").value.trim() }), 500); };
 $("#alertNtfy").oninput = saveAlerts; $("#alertDiscord").oninput = saveAlerts;
