@@ -219,7 +219,7 @@ const FILTERS = [
   ["built", "Image built", i => !!i.image],
   ["rename", "Needs renaming", i => i.canRename],
   ["loose", "Loose files", i => i.wrap && !i.done],
-  ["fw", "Needs newer firmware", i => i.needsFw],
+  ["fw", "Needs backport", i => i.needsFw],
   ["backport", "Backported", i => i.backport],
   ["dlc", "Has DLC", i => dlcCount(i) > 0],
   ["exfatonly", "exFAT only", i => i.exfatOnly],
@@ -267,9 +267,9 @@ function tagsHTML(it, forDrawer) {
   if (it.isPkg) t.push(`<span class="tag sky" title="A PS4 game package (.pkg). It installs on the PS5 as it is, so there's no image to build.">PS4 PKG</span>`);
   if (it.image) t.push(`<span class="tag mint" title="${esc(it.exfatOnly ? "Converted. The game folder is gone, it lives in this exFAT image now." : "Converted to an exFAT image")}">exFAT</span>`);
   else if (!it.present) t.push(`<span class="tag dim">Missing</span>`);
-  if (it.needsFw) t.push(`<span class="tag coral">Needs FW ${esc(it.reqFw)}</span>`);
+  if (it.needsFw) t.push(`<span class="tag coral" title="Built with SDK ${esc(it.sdk)}, newer than your firmware ${esc(S.settings.ConsoleFW)}, and it has no fakelib folder. It won't run until it's backported.">Needs backport</span>`);
   else if (forDrawer && it.reqFw) t.push(`<span class="tag dim">FW ${esc(it.reqFw)}</span>`);
-  if (it.backport) t.push(`<span class="tag gold" title="This game has already been backported: its folder holds a fakelib folder (or its name says backport). Loadout only labels it.">Backported</span>`);
+  if (it.backport) t.push(`<span class="tag gold" title="Backported: it carries a fakelib folder (in its folder or its image), so it runs on firmware older than it was built for. Loadout only labels it.">Backported</span>`);
   if (it.wrap && !it.done) t.push(`<span class="tag sky">Loose files</span>`);
   if (dlcCount(it)) t.push(`<span class="tag lilac">DLC ${dlcCount(it)}</span>`);
   if (it.onPs5) t.push(`<span class="tag sky" title="${esc(ps5Copies(it))}">On PS5</span>`);
@@ -321,8 +321,8 @@ function renderDrawer() {
   const f = [
     ["Title ID", `<span class="id">${esc(it.titleId || "Unknown")}</span>`],
     ["Version", esc(it.version || "Unknown")],
-    ["Built with SDK", esc(it.sdk || "Unknown")],
-    ["Needs firmware", esc(it.reqFw || "Unknown") + (it.needsFw ? ` <span style="color:var(--coral)">(newer than your ${esc(S.settings.ConsoleFW)})</span>` : "")],
+    ["Asks for firmware", esc(it.reqFw || "Unknown")],
+    ["Built with SDK", esc(it.sdk || "Unknown") + (it.needsFw ? ` <span style="color:var(--coral)">(newer than your ${esc(S.settings.ConsoleFW)}, and not backported)</span>` : it.backport ? " (backported)" : "")],
     ["Platform", esc(it.platform || "Unknown")],
     ["Content ID", esc(it.contentId || "Unknown")],
     ["Size", it.sized ? esc(size(it.size)) : "Calculating…"],

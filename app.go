@@ -797,6 +797,20 @@ func (a *App) stateLocked() State {
 			}
 		}
 	}
+	// backports: a fakelib folder in the game or in its image counts, and only
+	// a game built with a newer SDK than the console's firmware needs one
+	setImageLookDirs(a.imageDirsLocked())
+	for i := range st.Items {
+		it := &st.Items[i]
+		if it.Image != "" && !it.Backport && imageBackported(it.Image) {
+			it.Backport = true
+		}
+		if e := a.lib.Games[it.LibKey]; e != nil && it.LibKey != "" {
+			it.NeedsFW = needsBackport(e, a.cfg.ConsoleFW, it.Backport)
+		} else {
+			it.NeedsFW = false
+		}
+	}
 	if st.Items == nil {
 		st.Items = []Item{}
 	}

@@ -284,6 +284,55 @@ func (a *App) watchLoop() {
 	}
 }
 
+func extractingFile() string { return filepath.Join(appDir(), "extracting.json") }
+
+var staleOnce sync.Once
+
+// stopStaleExtraction stops a 7-Zip left running by a Loadout that closed
+// mid-extraction, and removes its half-extracted folder: it's started again
+// from the beginning.
+func stopStaleExtraction() {
+	var x struct {
+		Pid int
+		Dir string
+	}
+	b, err := os.ReadFile(extractingFile())
+	if err != nil || json.Unmarshal(b, &x) != nil {
+		return
+	}
+	if x.Pid > 0 && processIs(x.Pid, "7z.exe") {
+		if p, err := os.FindProcess(x.Pid); err == nil {
+			p.Kill()
+			p.Wait()
+		}
+		time.Sleep(time.Second) // let Windows let go of its files
+	}
+	if x.Dir != "" && strings.Contains(filepath.Base(x.Dir), ".loadout-extracting-") {
+		os.RemoveAll(x.Dir)
+	}
+	os.Remove(extractingFile())
+}
+
+// processIs says whether process pid is running the program named exe.
+func processIs(pid int, exe string) bool {
+	c := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/FO", "CSV", "/NH")
+	hideChild(c)
+	out, err := c.Output()
+	return err == nil && strings.HasPrefix(strings.ToLower(strings.TrimSpace(string(out))), `"`+strings.ToLower(exe)+`"`)
+}
+
+// retryFailedAfter: a set that failed (a damaged part, no room) is tried again after this.
+const retryFailedAfter = 6 * time.Hour
+
+// handled says whether a set was dealt with already: done, or failed lately.
+func handled(r watchRecord, ok bool, size int64) bool {
+	if !ok || r.Size != size {
+		return false
+	}
+	failed := strings.HasPrefix(r.Result, "Couldn't") || strings.HasPrefix(r.Result, "Not enough space")
+	return !failed || time.Since(r.When) < retryFailedAfter
+}
+
 // checkDownloads extracts the PS5 games that finished downloading into the
 // games folder, and files Switch games in the ROM library.
 func (a *App) checkDownloads() {
@@ -291,6 +340,7 @@ func (a *App) checkDownloads() {
 		return // a check (maybe a long extraction) is already running
 	}
 	defer watchMu.Unlock()
+	staleOnce.Do(stopStaleExtraction)
 	a.mu.Lock()
 	folder, games, roms := strings.TrimSpace(a.cfg.WatchFolder), a.watchDestLocked(), strings.TrimSpace(a.cfg.RomFolder)
 	on := folder != "" && boolOr(a.cfg.WatchOn, true)
@@ -316,7 +366,7 @@ func (a *App) checkDownloads() {
 	// Switch games that are already files (downloaded as is, or extracted by hand)
 	for _, f := range switchFiles(folder) {
 		key := strings.ToLower(f.path)
-		if r, ok := recs[key]; ok && r.Size == f.size {
+		if r, ok := recs[key]; handled(r, ok, f.size) {
 			continue
 		}
 		if !f.settled {
@@ -333,7 +383,7 @@ func (a *App) checkDownloads() {
 
 	for _, s := range findArchiveSets(folder) {
 		key := strings.ToLower(s.first)
-		if r, ok := recs[key]; ok && r.Size == s.size {
+		if r, ok := recs[key]; handled(r, ok, s.size) {
 			continue // handled already, and it hasn't changed since
 		}
 		done, why := downloadDone(s)
@@ -419,6 +469,11 @@ func (a *App) run7z(tool, first, dir, name string) error {
 	if err := c.Start(); err != nil {
 		return err
 	}
+	// noted, so a Loadout started after this one closed (an update, a crash)
+	// stops it instead of running a second extraction into the same folder
+	b, _ := json.Marshal(map[string]any{"pid": c.Process.Pid, "dir": dir})
+	os.WriteFile(extractingFile(), b, 0644)
+	defer os.Remove(extractingFile())
 	// 7-Zip redraws its progress with backspaces: read in chunks, keep the last percent
 	buf := make([]byte, 4096)
 	for {
