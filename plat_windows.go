@@ -457,7 +457,7 @@ func main() {
 	if a.cfg.Folder != "" {
 		a.startScan("")
 	}
-	os.Setenv("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "FF0E1420")
+	os.Setenv("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "FF070B18")
 	w := webview2.NewWithOptions(webview2.WebViewOptions{
 		AutoFocus: true,
 		DataPath:  filepath.Join(appDir(), "WebView2"),

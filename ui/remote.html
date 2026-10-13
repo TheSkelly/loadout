@@ -6,12 +6,12 @@
 <meta name="theme-color" content="#0E1420">
 <title>Loadout Remote</title>
 <style>
-:root { --ink:#0E1420; --ink2:#131B29; --surface:#182131; --raised:#22304A; --line:#2C3A55; --text:#E7ECF5; --muted:#8C9AB3; --faint:#5E6B84; --manila:#E9C46A; --mint:#5BC8A0; --coral:#EF6F6C; --sky:#59B8F0; color-scheme: dark; }
+:root { --ink:#070B18; --ink2:#0B1226; --surface:#0F1A33; --raised:#17244A; --line:#253663; --text:#E8F1FB; --muted:#8FA3C4; --faint:#5A6B8E; --accent:#4B9CD3; --mint:#5BC8A0; --coral:#EF6F6C; --sky:#8FD8FF; color-scheme: dark; }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; background: var(--ink); color: var(--text); font: 15px/1.45 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; }
 body { padding: env(safe-area-inset-top) 0 calc(env(safe-area-inset-bottom) + 24px); }
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
-header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: rgba(14,20,32,.92); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: rgba(7,11,24,.92); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
 header svg { width: 26px; height: 26px; flex: none; }
 header b { font-size: 17px; }
 header small { color: var(--faint); margin-left: auto; font-size: 12px; text-align: right; }
@@ -24,7 +24,7 @@ h2 { font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: v
 .lane .what { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lane .pct { font-variant-numeric: tabular-nums; color: var(--muted); }
 .track { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 10px 0 8px; }
-.track i { display: block; height: 100%; width: 0; background: var(--manila); transition: width .4s; }
+.track i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
 .track.ps5 i { background: var(--sky); }
 .lane .sub { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
 .lane .sub span { flex: 1; }
@@ -36,7 +36,7 @@ h2 { font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: v
 .jobs li:first-child { border-top: 0; }
 .jobs .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .jobs .s { color: var(--muted); font-size: 12.5px; text-align: right; max-width: 55%; }
-.jobs .s.ok { color: var(--mint); } .jobs .s.bad { color: var(--coral); } .jobs .s.run { color: var(--manila); }
+.jobs .s.ok { color: var(--mint); } .jobs .s.bad { color: var(--coral); } .jobs .s.run { color: var(--accent); }
 .drives { display: flex; gap: 8px; flex-wrap: wrap; }
 .drives span { background: var(--raised); border-radius: 10px; padding: 8px 12px; font-size: 13px; color: var(--muted); }
 .drives b { color: var(--sky); display: block; font-size: 15px; }
@@ -47,8 +47,8 @@ h2 { font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: v
 .game .info b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .game .info small { color: var(--muted); font-size: 12.5px; }
 .tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; margin-right: 4px; background: rgba(91,200,160,.16); color: var(--mint); }
-.tag.ps5 { background: rgba(89,184,240,.16); color: var(--sky); }
-.go { padding: 9px 14px; border-radius: 10px; background: var(--manila); color: #3A2E0E; font-weight: 700; font-size: 13.5px; flex: none; }
+.tag.ps5 { background: rgba(143,216,255,.16); color: var(--sky); }
+.go { padding: 9px 14px; border-radius: 10px; background: var(--accent); color: #04121F; font-weight: 700; font-size: 13.5px; flex: none; }
 .go[disabled] { opacity: .45; }
 .sheet { position: fixed; inset: 0; z-index: 20; background: rgba(5,8,14,.72); display: flex; align-items: flex-end; }
 .sheet[hidden] { display: none; }
@@ -67,20 +67,20 @@ h2 { font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: v
 #login h1 { font-size: 22px; margin: 12px 0 4px; }
 #login p { color: var(--muted); margin: 0 0 18px; }
 #login input { width: 100%; padding: 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 22px; text-align: center; letter-spacing: .3em; }
-#login button { width: 100%; margin-top: 12px; padding: 14px; border-radius: 12px; background: var(--manila); color: #3A2E0E; font-weight: 700; font-size: 16px; }
+#login button { width: 100%; margin-top: 12px; padding: 14px; border-radius: 12px; background: var(--accent); color: #04121F; font-weight: 700; font-size: 16px; }
 #login .err { color: var(--coral); min-height: 22px; margin-top: 10px; font-size: 14px; }
 #toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); background: var(--raised); border: 1px solid var(--line); padding: 10px 16px; border-radius: 12px; font-size: 14px; z-index: 30; max-width: 90vw; }
 #toast[hidden] { display: none; } #toast.bad { border-color: var(--coral); }
 .game { cursor: pointer; }
-.game.sel { border-color: var(--manila); background: #1E2838; }
-.game .tick { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line); flex: none; display: grid; place-items: center; font-size: 13px; font-weight: 800; color: #3A2E0E; }
-.game.sel .tick { background: var(--manila); border-color: var(--manila); }
+.game.sel { border-color: var(--accent); background: #13254A; }
+.game .tick { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line); flex: none; display: grid; place-items: center; font-size: 13px; font-weight: 800; color: #04121F; }
+.game.sel .tick { background: var(--accent); border-color: var(--accent); }
 .pick { margin: 0 0 12px; }
 .pick > small { display: block; color: var(--muted); font-size: 12.5px; margin: 0 2px 6px; }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .chip { padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); font-size: 13.5px; font-weight: 600; text-align: left; }
 .chip small { display: block; font-weight: 400; color: var(--muted); font-size: 11.5px; }
-.chip.on { border-color: var(--sky); background: rgba(89,184,240,.14); color: var(--sky); }
+.chip.on { border-color: var(--sky); background: rgba(143,216,255,.14); color: var(--sky); }
 #bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; background: var(--ink2); border-top: 1px solid var(--line); padding: 12px 14px calc(env(safe-area-inset-bottom) + 12px); }
 #bar[hidden] { display: none; }
 #bar .in { max-width: 720px; margin: 0 auto; }
@@ -88,7 +88,7 @@ h2 { font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: v
 #bar .head button { margin-left: auto; color: var(--muted); font-weight: 400; padding: 4px 8px; }
 #bar .acts { display: flex; gap: 8px; }
 #bar .acts button { flex: 1; padding: 11px 6px; border-radius: 10px; font-weight: 700; font-size: 13.5px; background: var(--raised); border: 1px solid var(--line); }
-#bar .acts button.main { background: var(--manila); color: #3A2E0E; border-color: var(--manila); }
+#bar .acts button.main { background: var(--accent); color: #04121F; border-color: var(--accent); }
 #bar .acts button[disabled] { opacity: .4; }
 body.hasbar { padding-bottom: 230px; }
 .hint { color: var(--faint); font-size: 12.5px; margin: -2px 4px 10px; }
@@ -103,7 +103,7 @@ body.hasbar { padding-bottom: 230px; }
 <body>
 <div id="login" hidden>
   <form id="loginForm">
-    <svg viewBox="0 0 32 32"><path d="M5 9.5A2.5 2.5 0 0 1 7.5 7H20l7 9-7 9H7.5A2.5 2.5 0 0 1 5 22.5z" fill="#E9C46A"/><circle cx="10.5" cy="16" r="2" fill="#0E1420"/></svg>
+    <svg viewBox="0 0 32 32"><polygon points="16.00,31.00 3.01,23.50 3.01,8.50 16.00,1.00 28.99,8.50 28.99,23.50" fill="#2F5BD8"/><polygon points="16.00,29.40 4.40,22.70 4.40,9.30 16.00,2.60 27.60,9.30 27.60,22.70" fill="#04060E"/><polygon points="16.00,28.40 5.26,22.20 5.26,9.80 16.00,3.60 26.74,9.80 26.74,22.20" fill="#4B9CD3"/><polygon points="16.00,27.40 6.13,21.70 6.13,10.30 16.00,4.60 25.87,10.30 25.87,21.70" fill="#10164A"/><path d="M13.9 7.6h4.2v8.1h3.8L16 21.4l-5.9-5.7h3.8z" fill="#4B9CD3"/><path d="M9.6 19.6v3.3h12.8v-3.3" fill="none" stroke="#C4E8FF" stroke-width="1.3" stroke-linejoin="round"/></svg>
     <h1>Loadout Remote</h1>
     <p>Enter the PIN you set in Loadout on your PC.</p>
     <input id="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="12" aria-label="PIN">
@@ -114,7 +114,7 @@ body.hasbar { padding-bottom: 230px; }
 
 <div id="app" hidden>
   <header>
-    <svg viewBox="0 0 32 32"><path d="M5 9.5A2.5 2.5 0 0 1 7.5 7H20l7 9-7 9H7.5A2.5 2.5 0 0 1 5 22.5z" fill="#E9C46A"/><circle cx="10.5" cy="16" r="2" fill="#0E1420"/></svg>
+    <svg viewBox="0 0 32 32"><polygon points="16.00,31.00 3.01,23.50 3.01,8.50 16.00,1.00 28.99,8.50 28.99,23.50" fill="#2F5BD8"/><polygon points="16.00,29.40 4.40,22.70 4.40,9.30 16.00,2.60 27.60,9.30 27.60,22.70" fill="#04060E"/><polygon points="16.00,28.40 5.26,22.20 5.26,9.80 16.00,3.60 26.74,9.80 26.74,22.20" fill="#4B9CD3"/><polygon points="16.00,27.40 6.13,21.70 6.13,10.30 16.00,4.60 25.87,10.30 25.87,21.70" fill="#10164A"/><path d="M13.9 7.6h4.2v8.1h3.8L16 21.4l-5.9-5.7h3.8z" fill="#4B9CD3"/><path d="M9.6 19.6v3.3h12.8v-3.3" fill="none" stroke="#C4E8FF" stroke-width="1.3" stroke-linejoin="round"/></svg>
     <b>Loadout</b>
     <small id="hdr"></small>
   </header>
