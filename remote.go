@@ -203,6 +203,7 @@ type remoteState struct {
 	Drive    string          `json:"drive"`
 	Games    []remoteGame    `json:"games"`
 	Payloads []remotePayload `json:"payloads"`
+	PS5App   bool            `json:"ps5App"` // the PS5 app can be installed from here
 }
 
 type remotePayload struct {
@@ -226,7 +227,7 @@ func (a *App) remoteStateLocked() remoteState {
 	a.toast = append(st.Toasts, a.toast...)
 	host, _ := os.Hostname()
 	rs := remoteState{Version: appVersion, PC: host, Summary: a.build.Summary, Online: a.ps5info.Online,
-		HasPS5: strings.TrimSpace(a.cfg.PS5IP) != "", Drives: st.PS5.Drives, Drive: rootOf(a.cfg.PS5Dir), Jobs: []remoteJob{}, Games: []remoteGame{}, Payloads: []remotePayload{}}
+		HasPS5: strings.TrimSpace(a.cfg.PS5IP) != "", Drives: st.PS5.Drives, Drive: rootOf(a.cfg.PS5Dir), Jobs: []remoteJob{}, Games: []remoteGame{}, Payloads: []remotePayload{}, PS5App: ps5AppIncluded()}
 	for i, p := range st.Payloads {
 		rs.Payloads = append(rs.Payloads, remotePayload{I: i, Name: p.Name, Known: p.Known, Size: p.Size, Missing: p.Missing})
 	}
@@ -253,7 +254,8 @@ func (a *App) remoteStateLocked() remoteState {
 				busyKeys[j.Key] = true
 			}
 		}
-		if (j.Kind == "build" && j.Send) || j.Kind == "send" || j.Kind == "ps5del" || j.Kind == "ps5move" {
+		ps5app := j.Kind == "fxupdir" && j.Key == "fx:"+fwdRoot+"/"+ps5AppID
+		if (j.Kind == "build" && j.Send) || j.Kind == "send" || j.Kind == "ps5del" || j.Kind == "ps5move" || ps5app {
 			pTotal++
 			s := ps5JobState(j)
 			pct := j.Pct
@@ -264,7 +266,7 @@ func (a *App) remoteStateLocked() remoteState {
 			case fin[s]:
 				pDone++
 				pPct += 1000
-			case s == "sending" || s == "deleting" || s == "moving":
+			case s == "sending" || s == "deleting" || s == "moving" || s == "copying":
 				pPct += pct
 				verb := map[string]string{"deleting": "Deleting ", "moving": "Moving "}[s]
 				if verb == "" {
@@ -497,6 +499,14 @@ func (a *App) remoteHandler(rs *remoteServer) http.Handler {
 			return nil, errors.New("That payload isn't in Loadout's list any more. Refresh and try again.")
 		}
 		msg, err := a.runPayload(path, port)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"msg": msg}, nil
+	}))
+	// the phone can (re)install the PS5 app, the same as Settings on the PC
+	mux.HandleFunc("/r/ps5app", post(func(r *http.Request) (any, error) {
+		msg, err := a.installPS5App()
 		if err != nil {
 			return nil, err
 		}

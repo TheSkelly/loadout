@@ -126,6 +126,8 @@ body.hasbar { padding-bottom: 230px; }
     <div class="drives" id="drives"></div>
     <h2 id="pldHead" hidden>Payloads</h2>
     <div id="plds"></div>
+    <h2 id="appHead" hidden>Loadout on your PS5</h2>
+    <div id="ps5app"></div>
     <h2>Your games</h2>
     <input class="search" id="q" type="search" placeholder="Search games" autocomplete="off">
     <div class="hint">Tap games to pick several, or tap Start for just one.</div>
@@ -143,7 +145,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const size = n => { if (!n) return ""; const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0; while (n >= 1024 && i < 4) { n /= 1024; i++; } return (n >= 100 || i === 0 ? n.toFixed(0) : n.toFixed(1)) + " " + u[i]; };
 const dur = s => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h ? `${h}h ${String(m).padStart(2, "0")}m` : m ? `${m}m ${String(s % 60).padStart(2, "0")}s` : `${s}s`; };
-let S = null, timer = null, sheetKey = null;
+let S = null, timer = null, sheetKey = null, appSending = false;
 const sel = new Set(), sending = new Set();
 let drive = ""; try { drive = localStorage.getItem("loadoutDrive") || ""; } catch (e) {}
 // the PS5 drive games go to: the one picked here, else the PC's default
@@ -223,6 +225,9 @@ function render() {
   $("#pldHead").hidden = !ps.length;
   $("#plds").innerHTML = ps.map(p => `<div class="card pld"><div class="info"><b>${esc(p.name)}</b><small>${p.missing ? "File not found on the PC" : esc(p.known === "shsrv" ? "Free-space shell" : p.known === "ftpsrv" ? "FTP server" : size(p.size > 0 ? p.size : 0))}</small></div>
       <button class="go sky" data-pld="${p.i}" data-pname="${esc(p.name)}" ${p.missing || !S.hasPs5 || sending.has(p.i) ? "disabled" : ""}>${sending.has(p.i) ? "Sending" : "Send"}</button></div>`).join("");
+  $("#appHead").hidden = !S.ps5App;
+  $("#ps5app").innerHTML = S.ps5App ? `<div class="card pld"><div class="info"><b>The Loadout PS5 app</b><small>Puts it back on the PS5's home screen (under Media) and pairs it again. Updates after that go by themselves.</small></div>
+      <button class="go sky" data-ps5app="1" ${!S.hasPs5 || appSending ? "disabled" : ""}>${appSending ? "Sending" : "Install"}</button></div>` : "";
   const q = $("#q").value.trim().toLowerCase();
   const list = S.games.filter(g => !q || (g.name + " " + g.id).toLowerCase().includes(q));
   $("#games").innerHTML = list.length ? list.map(g => `<div class="card game ${sel.has(g.key) ? "sel" : ""}" data-pick="${esc(g.key)}">
@@ -273,6 +278,14 @@ document.addEventListener("click", async e => {
   if (pk) {
     const k = pk.dataset.pick, gm = S.games.find(x => x.key === k);
     if (gm && !gm.busy) { sel.has(k) ? sel.delete(k) : sel.add(k); render(); }
+    return;
+  }
+  if (e.target.closest("[data-ps5app]")) {
+    if (appSending || !confirm("Install the Loadout app on your PS5? It's paired again, so a copy installed before stops working until this one is in.")) return;
+    appSending = true; render();
+    try { const r = await call("/r/ps5app", {}); toast((r.data && r.data.msg) || "Sending the app to the PS5."); }
+    catch (err) { if (err.message !== "locked") toast(err.message, true); }
+    appSending = false; poll();
     return;
   }
   const pb = e.target.closest("[data-pld]");
