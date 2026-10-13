@@ -525,7 +525,7 @@ func probePS5(host string, port int, dirFor func(root string) string) PS5Info {
 		info.SpaceErr = dferr.Error()
 	}
 	if dferr == nil {
-		info.Shell, info.SpaceFrom = true, src
+		info.Shell, info.SpaceFrom = src == "shsrv", src
 		// with df we know exactly what's mounted
 		for _, e := range df {
 			if driveRe.MatchString(e.Mount) && rootOf(e.Mount) == e.Mount {

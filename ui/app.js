@@ -80,7 +80,7 @@ function ps5Stats() {
   const p = S.ps5 || {};
   if (!p.checked || p.checked.startsWith("0001")) return `<span class="dim">PS5: checking…</span>`;
   if (!p.online) return `<span class="dim" title="${esc(p.err || "")}">PS5 not reachable</span>`;
-  if (!p.shell) return `<button class="link" data-act="ps5help" title="${esc(p.spaceErr ? "Couldn't read free space. " + p.spaceErr : "Free space needs shsrv or the PS5Upload helper running on the PS5")}">PS5 free space?</button>`;
+  if (!p.shell && !p.spaceFrom) return `<button class="link" data-act="ps5help" title="${esc(p.spaceErr ? "Couldn't read free space. " + p.spaceErr : "Free space needs shsrv or the PS5Upload helper running on the PS5")}">PS5 free space?</button>`;
   return drives().filter(d => d.free >= 0).map(d =>
     `<span class="${d.free < 60e9 ? "low" : ""}" title="${esc(d.label)}: ${size(d.free)} free of ${size(d.total)}">${esc(d.short)}: <b>${size(d.free)}</b></span>`).join("");
 }
@@ -1230,7 +1230,7 @@ function renderDrives() {
       ${d.free >= 0 ? `<span class="dbar"><i class="${d.free < 60e9 ? "low" : ""}" style="width:${used}%"></i></span><span class="dfree"><b>${size(d.free)}</b> free of ${size(d.total)}</span>` : `<span class="dfree dim">free space unknown</span>`}</label>`;
   }).join("");
   if (ds.length) h += `<p class="hint2">The checked drive is where games go by default. You can pick a different drive per game on the Build & send screen.</p>`;
-  if (ds.length && !p.shell) h += `<p class="hint2 note">To see free space, load the <b>shsrv</b> payload on the PS5. It runs a small shell on port 2323 that Loadout asks for disk usage. Drives are found without it, but free space and the "not enough room" check need it. If shsrv isn't answering, Loadout also tries the PS5Upload helper.${p.spaceErr ? `<br><small>Last try: ${esc(p.spaceErr)}</small>` : ""}
+  if (ds.length && !p.shell && !p.spaceFrom) h += `<p class="hint2 note">To see free space, load the <b>shsrv</b> payload on the PS5. It runs a small shell on port 2323 that Loadout asks for disk usage. Drives are found without it, but free space and the "not enough room" check need it. If shsrv isn't answering, Loadout also tries the PS5Upload helper.${p.spaceErr ? `<br><small>Last try: ${esc(p.spaceErr)}</small>` : ""}
     <button class="btn sm primary" data-shsrvnow>${(S.payloads || []).some(x => x.known === "shsrv" && !x.missing) ? "Send shsrv now" : "Download and send shsrv"}</button></p>`;
   if (ds.length && p.online === false) h += `<p class="warnline">The PS5 isn't answering right now, so this is the list from last time.</p>`;
   el.innerHTML = h;

@@ -68,10 +68,10 @@ func (a *App) refreshSpace() {
 		return
 	}
 	if err != nil {
-		a.ps5info.Shell, a.ps5info.SpaceErr = false, err.Error()
+		a.ps5info.Shell, a.ps5info.SpaceFrom, a.ps5info.SpaceErr = false, "", err.Error()
 		return
 	}
-	a.ps5info.Shell, a.ps5info.SpaceFrom, a.ps5info.SpaceErr = true, src, ""
+	a.ps5info.Shell, a.ps5info.SpaceFrom, a.ps5info.SpaceErr = src == "shsrv", src, ""
 	for i := range a.ps5info.Drives {
 		d := &a.ps5info.Drives[i]
 		if e, ok := dfFor(df, d.Root); ok {

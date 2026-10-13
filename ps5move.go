@@ -2,9 +2,13 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"path"
 	"strconv"
 	"strings"
@@ -154,8 +158,8 @@ func (a *App) startPS5Move(paths []string, destRoot string) error {
 	if !a.ps5info.Online {
 		return errors.New("The PS5 isn't reachable right now.")
 	}
-	if !a.ps5info.Shell {
-		return errors.New("Moving games needs the shsrv payload running on the PS5. Send it from Settings › Payloads, then try again.")
+	if !a.ps5info.Shell && !p5uAvailable() {
+		return errors.New("Moving games needs the shsrv payload running on the PS5, or PS5Upload. Send shsrv from Settings › Payloads, then try again.")
 	}
 	destRoot = rootOf(destRoot)
 	var dest *PS5Drive
@@ -225,9 +229,6 @@ func (a *App) ps5Move(j *BuildJob) (string, error) {
 	host, port, _ := a.ps5()
 	src, destDir := j.image, j.Dest
 	srcDir, base := path.Dir(src), path.Base(src)
-	if !shellSafe(srcDir) || !shellSafe(destDir) {
-		return "", errors.New("one of the folders has a space or symbol in its name, which the PS5's shell can't handle")
-	}
 	cancelled := func() bool { return a.ps5Stopped(j) }
 	a.mu.Lock()
 	j.State, j.Pct, j.Note = "moving", 0, "Getting ready"
@@ -277,10 +278,27 @@ func (a *App) ps5Move(j *BuildJob) (string, error) {
 		}
 	}
 
-	sh, err := shellOpen(host)
+	// the copy runs on the PS5: through shsrv's cp, or PS5Upload's copy when
+	// shsrv isn't answering (it can be loaded but stuck)
+	a.mu.Lock()
+	shellUp := a.ps5info.Shell
+	a.mu.Unlock()
+	var sh *shellConn
+	if shellUp || !p5uAvailable() {
+		sh, err = shellOpen(host)
+	} else {
+		err = errors.New("shsrv isn't answering") // known already: don't wait on it
+	}
+	if err == nil && (!shellSafe(srcDir) || !shellSafe(destDir)) {
+		sh.Close()
+		sh, err = nil, errors.New("one of the folders has a space or symbol in its name, which the PS5's shell can't handle")
+	}
 	if err != nil {
-		restore()
-		return "", err
+		if !p5uAvailable() {
+			restore()
+			return "", err
+		}
+		sh = nil
 	}
 	start := time.Now()
 	var lastSize int64
@@ -291,7 +309,7 @@ func (a *App) ps5Move(j *BuildJob) (string, error) {
 			poll.Close()
 		}
 	}()
-	out, err := sh.run("cp "+srcTmp+" "+dstTmp, func() error {
+	progress := func() error {
 		if cancelled() {
 			return errFTPCancelled
 		}
@@ -324,11 +342,20 @@ func (a *App) ps5Move(j *BuildJob) (string, error) {
 			return errors.New("the copy stopped making progress")
 		}
 		return nil
-	})
-	if err != nil {
-		sh.interrupt() // stop the copy on the PS5
 	}
-	sh.Close()
+	var out string
+	if sh != nil {
+		out, err = sh.run("cp "+srcTmp+" "+dstTmp, progress)
+		if err != nil {
+			sh.interrupt() // stop the copy on the PS5
+		}
+		sh.Close()
+	} else {
+		a.mu.Lock()
+		j.Note = "Copying with PS5Upload"
+		a.mu.Unlock()
+		err = p5uCopyOnPS5(host, srcTmp, dstTmp, progress)
+	}
 	if poll != nil {
 		poll.Close()
 		poll = nil
@@ -367,4 +394,57 @@ func (a *App) ps5Move(j *BuildJob) (string, error) {
 		return fmt.Sprintf("Copied to %s in %s, but the original couldn't be removed (is the game running?). It's on both drives now.", j.DestLabel, fmtDur(time.Since(start))), nil
 	}
 	return fmt.Sprintf("Moved to %s in %s", j.DestLabel, fmtDur(time.Since(start))), nil
+}
+
+// p5uCopyOnPS5 copies a file from one place on the PS5 to another with
+// PS5Upload (its helper does the copy on the console). The call returns when
+// the copy is done; progress is called every few seconds meanwhile (it reads
+// the copy's size), and an error from it stops the wait. A copy that's
+// stopped this way may finish on the PS5 anyway; the caller removes it.
+func p5uCopyOnPS5(host, from, to string, progress func() error) error {
+	base, err := p5uReady(host, nil)
+	if err != nil {
+		return fmt.Errorf("PS5Upload couldn't start: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		body, _ := json.Marshal(map[string]string{"addr": host, "from": from, "to": to})
+		req, _ := http.NewRequest("POST", base+"/api/ps5/fs/copy", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		r, err := (&http.Client{}).Do(req) // no time limit: a game takes a while
+		if err != nil {
+			done <- err
+			return
+		}
+		defer r.Body.Close()
+		b, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		var res struct {
+			Ok    bool
+			Error string
+		}
+		json.Unmarshal(b, &res)
+		switch {
+		case r.StatusCode >= 400 || res.Error != "":
+			if res.Error == "" {
+				res.Error = strings.TrimSpace(string(b))
+			}
+			done <- errors.New(res.Error)
+		case !res.Ok:
+			done <- errors.New("PS5Upload didn't say the copy worked")
+		default:
+			done <- nil
+		}
+	}()
+	tick := time.NewTicker(3 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case err := <-done:
+			return err
+		case <-tick.C:
+			if err := progress(); err != nil {
+				return err
+			}
+		}
+	}
 }
