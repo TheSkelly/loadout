@@ -14,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -124,7 +125,8 @@ type storeGame struct {
 	Rated     string   `json:"rated"`
 	Cover     string   `json:"cover"` // art key for /s/art, "" when there is none
 	Hero      string   `json:"hero"`
-	Shots     int      `json:"shots"`
+	Shots     int      `json:"shots"` // screenshots, at /s/art?k=<lib>&f=shot<n>
+	Lib       string   `json:"lib"`
 	Ready     bool     `json:"ready"`  // an image is built, so it can be sent right away
 	CanGet    bool     `json:"canGet"` // it can be built (if needed) and sent
 	OnPS5     string   `json:"onPs5"`  // where it already is on the PS5, if anywhere
@@ -213,6 +215,9 @@ func (a *App) storeGamesLocked() []storeGame {
 		if it.Hero {
 			g.Hero = it.LibKey
 		}
+		if g.Shots > 0 {
+			g.Lib = it.LibKey
+		}
 		games = append(games, g)
 	}
 	sort.Slice(games, func(i, j int) bool { return strings.ToLower(games[i].Name) < strings.ToLower(games[j].Name) })
@@ -269,15 +274,27 @@ func (a *App) storeGet(key, drive string) (string, error) {
 }
 
 // storeArtPath finds the picture behind an art key: "cover" is the game's
-// icon, "hero" its big background.
+// icon, "hero" its big background, "shot0".."shot5" its screenshots.
 func (a *App) storeArtPath(k, f string) string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	e := a.lib.Games[k]
+	inArt := func(p string) string {
+		if p != "" && strings.HasPrefix(filepath.Clean(p), filepath.Clean(artDir())) {
+			return p
+		}
+		return ""
+	}
+	if n, err := strconv.Atoi(strings.TrimPrefix(f, "shot")); err == nil && strings.HasPrefix(f, "shot") {
+		if e != nil && e.Store != nil && n >= 0 && n < len(e.Store.Shots) {
+			return inArt(e.Store.Shots[n])
+		}
+		return ""
+	}
 	switch f {
 	case "hero":
-		if e != nil && e.Hero != "" && strings.HasPrefix(filepath.Clean(e.Hero), filepath.Clean(artDir())) {
-			return e.Hero
+		if e != nil {
+			return inArt(e.Hero)
 		}
 		return ""
 	case "full":
@@ -291,10 +308,12 @@ func (a *App) storeArtPath(k, f string) string {
 	if e == nil {
 		return ""
 	}
-	if e.Thumb != "" && fileExists(e.Thumb) {
-		return e.Thumb
+	// the TV draws covers at 300 px and more: the 48 px list thumbnail is
+	// only for when there's no icon
+	if e.Icon != "" && fileExists(e.Icon) {
+		return e.Icon
 	}
-	return e.Icon
+	return e.Thumb
 }
 
 // ---------- routes ----------

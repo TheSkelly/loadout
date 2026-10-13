@@ -32,6 +32,7 @@ async function call(url, options = {}) {
       options.body ? {'Content-Type': 'application/json'} : {}),
     body: options.body ? JSON.stringify(options.body) : undefined,
     maxBytes: options.maxBytes || 1024 * 1024,
+    signal: options.signal,
   });
   let data = {};
   try {
@@ -48,28 +49,55 @@ async function call(url, options = {}) {
   return data;
 }
 
-// connect asks every address Loadout listed at once and uses the first that
-// answers: an address the PS5 can't reach (a VPN's, say) only times out.
-export function connect() {
-  return new Promise((resolve, reject) => {
-    let left = config.urls.length, last = null, done = false;
-    for (const url of config.urls) {
-      call(`${url}/s/hello`, {maxBytes: 4096}).then(hello => {
-        if (done || hello.app !== 'Loadout') throw new Error(`${url} isn't Loadout`);
-        done = true;
-        base = url;
-        resolve(hello);
-      }).catch(err => {
-        if (done) return;
-        if (err.unpaired) { done = true; reject(err); return; }
-        last = err;
-        if (--left === 0) {
-          reject(new Error(`Can't reach your PC${config.pc ? ` (${config.pc})` : ''}. Make sure Loadout is running there, even if only in the tray.` +
-            (last ? `\n${last.message}` : '')));
-        }
-      });
+// PS5 React runs one HTTP request at a time, so addresses are tried in turn,
+// each given a few seconds: an address the PS5 can't reach (a VPN's, say)
+// would otherwise hold every later request for its 30-second timeout. The
+// address that worked last time goes first.
+const LAST = `${FileSystem.dataDir}/loadout-last.json`;
+const TRY_MS = 2500;
+
+// timeout is an abort signal that fires after ms; the framework has no AbortController
+function timeout(ms) {
+  const listeners = new Set();
+  const signal = {aborted: false,
+    addEventListener: (type, fn) => listeners.add(fn),
+    removeEventListener: (type, fn) => listeners.delete(fn)};
+  const timer = setTimeout(() => { signal.aborted = true; for (const fn of [...listeners]) fn(); }, ms);
+  return {signal, clear: () => clearTimeout(timer)};
+}
+
+function lastGood() {
+  try {
+    return JSON.parse(FileSystem.readFile(LAST)).url || '';
+  } catch (err) {
+    return '';
+  }
+}
+
+export async function connect() {
+  const last = lastGood();
+  const urls = [...new Set([last, ...config.urls].filter(Boolean))];
+  let error = null;
+  for (const url of urls) {
+    const t = timeout(TRY_MS);
+    try {
+      const hello = await call(`${url}/s/hello`, {maxBytes: 4096, signal: t.signal});
+      if (hello.app !== 'Loadout') throw new Error(`${url} isn't Loadout`);
+      base = url;
+      if (url !== last) {
+        try { FileSystem.writeFile(LAST, JSON.stringify({url})); } catch (err) { /* only a speed-up */ }
+      }
+      return hello;
+    } catch (err) {
+      if (err.unpaired) throw err;
+      error = t.signal.aborted ? new Error(`${url} didn't answer`) : err;
+    } finally {
+      t.clear();
     }
-  });
+  }
+  throw new Error(`Can't reach your PC${config.pc ? ` (${config.pc})` : ''}. Make sure Loadout is running there, even if only in the tray.` +
+    (error ? `
+${error.message}` : ''));
 }
 
 export const api = {
@@ -80,6 +108,7 @@ export const api = {
 };
 
 // art is a picture URL; pictures can't carry headers, so the token rides along.
+// kind is cover, hero or shot0..shot5.
 export function art(key, kind) {
   if (!key || !base) return null;
   return `${base}/s/art?k=${encodeURIComponent(key)}&f=${kind}&t=${encodeURIComponent(config.token)}`;
