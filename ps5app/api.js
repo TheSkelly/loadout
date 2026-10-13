@@ -79,7 +79,8 @@ export async function connect() {
   const urls = [...new Set([last, ...config.urls].filter(Boolean))];
   let error = null;
   for (const url of urls) {
-    const t = timeout(TRY_MS);
+    // the likely address gets longer: a connect retried once takes about 3 s
+    const t = timeout(url === urls[0] ? 8000 : TRY_MS);
     try {
       const hello = await call(`${url}/s/hello`, {maxBytes: 4096, signal: t.signal});
       if (hello.app !== 'Loadout') throw new Error(`${url} isn't Loadout`);

@@ -142,7 +142,11 @@ func (a *App) applyRemote() {
 		return
 	}
 	rs := &remoteServer{port: port, token: randHex(24)}
-	rs.srv = &http.Server{Handler: a.remoteHandler(rs), ReadHeaderTimeout: 10 * time.Second}
+	// IdleTimeout closes keep-alive connections nobody is using. A PS5 app
+	// that's closed leaves its connections open here, and the next launch
+	// reuses the same source ports: its connects then collide with those
+	// leftovers and stall for seconds each, until Loadout restarts.
+	rs.srv = &http.Server{Handler: a.remoteHandler(rs), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 15 * time.Second}
 	if pc, err := net.ListenPacket("udp4", ":"+strconv.Itoa(port)); err == nil {
 		rs.disc = pc // without it the PS5 app can still be given the address by hand
 		go serveDiscovery(pc, port)
