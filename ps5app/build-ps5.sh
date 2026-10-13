@@ -46,4 +46,6 @@ PY
 rm -rf "$HERE/dist/$TITLE"
 mkdir -p "$HERE/dist"
 cp -r "$PS5_REACT/dist/$TITLE" "$HERE/dist/$TITLE"
+# the package installer Loadout sends to the PS5's payload loader (payloads/build.sh)
+cp "$HERE/payloads/pkg-install.elf" "$HERE/dist/$TITLE/"
 echo "Built $HERE/dist/$TITLE"

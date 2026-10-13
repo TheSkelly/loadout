@@ -102,6 +102,7 @@ type BuildJob struct {
 	gen       int32  // PS5 lane stop counter when this job was queued
 	only      string // a ZIP install that must be this one app folder (an update)
 	save      *PS5Save
+	contentID string // pkginst: the package's content ID, needed for PS5 packages
 	sums      map[string]FileSum // checksums from this run's build, for the check
 	backup    *SaveBackup
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -128,7 +130,14 @@ func (a *App) startPkgInstall(key string) error {
 }
 
 func (a *App) pkgInstall(j *BuildJob) (string, error) {
-	host, _, _ := a.ps5()
+	host, ftpPort, _ := a.ps5()
+	// the payload loader installs PS5 and PS4 packages; DPI is the fallback
+	if elf := pkgInstallerELF(); elf != nil {
+		if c, err := net.DialTimeout("tcp", net.JoinHostPort(host, fmt.Sprint(loaderPort)), 3*time.Second); err == nil {
+			c.Close()
+			return a.pkgInstallByLoader(j, host, ftpPort, elf)
+		}
+	}
 	a.mu.Lock()
 	j.State, j.Note = "sending", "Asking the PS5 to install it"
 	a.mu.Unlock()
@@ -142,7 +151,7 @@ func (a *App) pkgInstall(j *BuildJob) (string, error) {
 	}
 	c, err := net.DialTimeout("tcp", net.JoinHostPort(host, fmt.Sprint(dpiPort)), 5*time.Second)
 	if err != nil {
-		return "", errors.New("the PS5's package installer isn't answering (port 9090). In the etaHEN toolbox on the PS5, turn on the Direct Package Installer (DPI), then try again")
+		return "", errors.New("the PS5 has no package installer running: neither a payload loader (port 9021) nor etaHEN's Direct Package Installer (port 9090) is answering. Load an ELF loader on the PS5, or turn on DPI in the etaHEN toolbox, then try again")
 	}
 	myIP, _, _ := net.SplitHostPort(c.LocalAddr().String())
 	tok := make([]byte, 12)
@@ -197,4 +206,132 @@ func (a *App) pkgInstall(j *BuildJob) (string, error) {
 		}
 	}
 	return "Sent in " + fmtDur(time.Since(start)) + ". The PS5 finishes installing it by itself; watch its Downloads list", nil
+}
+
+// ---------- installing through the payload loader ----------
+
+// The PS5's payload loader (port 9021) runs an ELF sent to it and hands it
+// the rest of the connection. pkg-install.elf (ps5app/payloads) asks the
+// console's install service to install a package already on the PS5, so the
+// package is copied over first, then installed, then its copy removed.
+
+const (
+	loaderPort = 9021
+	pkgDropDir = "/data/loadout/pkg"
+)
+
+var pkgNameRe = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
+// pkgInstallerELF is the installer payload, shipped with the PS5 app.
+func pkgInstallerELF() []byte {
+	if src := ps5AppSource(); src != "" {
+		if b, err := os.ReadFile(filepath.Join(src, "pkg-install.elf")); err == nil {
+			return b
+		}
+	}
+	exe, _ := os.Executable()
+	if b, err := os.ReadFile(filepath.Join(filepath.Dir(exe), "ps5app", "payloads", "pkg-install.elf")); err == nil {
+		return b
+	}
+	return nil
+}
+
+func (a *App) pkgInstallByLoader(j *BuildJob, host string, ftpPort int, elf []byte) (string, error) {
+	start := time.Now()
+	cid := j.contentID
+	if cid == "" {
+		// a PS4 package names it in its header; a PS5 one only in its file name
+		if m := contentIDRe.FindString(strings.ToUpper(filepath.Base(j.image))); m != "" {
+			cid = m
+		}
+	}
+	name := strings.Trim(pkgNameRe.ReplaceAllString(strings.TrimSuffix(filepath.Base(j.image), filepath.Ext(j.image)), "_"), "_.")
+	if name == "" {
+		name = "package"
+	}
+	remote := path.Join(pkgDropDir, name+".pkg")
+
+	a.mu.Lock()
+	j.State, j.Note = "sending", "Copying the package to the PS5"
+	a.mu.Unlock()
+	f, err := ftpDial(host, ftpPort)
+	if err != nil {
+		return "", err
+	}
+	prog := a.saveProgress(j, "sending")
+	cancelled := func() bool { return a.ps5Stopped(j) }
+	_, err = f.uploadAs(j.image, pkgDropDir, name+".pkg", true, func(done, total int64) { prog(done, total) }, cancelled)
+	f.Close()
+	if err != nil {
+		if errors.Is(err, errFTPCancelled) {
+			return "Stopped before installing", err
+		}
+		return "", fmt.Errorf("the package couldn't be copied to the PS5: %v", err)
+	}
+	// the copy goes once the install is over, however it went
+	defer func() {
+		if f, err := ftpDial(host, ftpPort); err == nil {
+			f.cmd("DELE %s", remote)
+			f.Close()
+		}
+	}()
+
+	a.mu.Lock()
+	j.State, j.Pct, j.Note = "sending", 0, "Installing on the PS5"
+	a.mu.Unlock()
+	c, err := net.DialTimeout("tcp", net.JoinHostPort(host, fmt.Sprint(loaderPort)), 5*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("the PS5's payload loader (port %d) stopped answering", loaderPort)
+	}
+	defer c.Close()
+	c.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	if _, err := c.Write(elf); err != nil {
+		return "", fmt.Errorf("the installer couldn't be sent to the PS5: %v", shortNetErr(err))
+	}
+	label := j.Name
+	if label == "" {
+		label = name
+	}
+	if _, err := fmt.Fprintf(c, "PKI2\n%s\n%s\n%s\n", remote, strings.ReplaceAll(label, "\n", " "), cid); err != nil {
+		return "", fmt.Errorf("the installer couldn't be started: %v", shortNetErr(err))
+	}
+	r := bufio.NewReader(c)
+	for {
+		if a.ps5Stopped(j) {
+			return "Stopped here. The PS5 may finish an install it already started", errFTPCancelled
+		}
+		c.SetReadDeadline(time.Now().Add(90 * time.Second))
+		line, err := r.ReadString('\n')
+		line = strings.TrimSpace(line)
+		switch {
+		case line == "ok":
+			return "Installed in " + fmtDur(time.Since(start)), nil
+		case strings.HasPrefix(line, "fail "):
+			msg := strings.TrimSpace(strings.TrimPrefix(line, "fail "))
+			if code, reason, ok := strings.Cut(msg, " "); ok {
+				if code != "00000000" {
+					return "", fmt.Errorf("the PS5 refused the package: %s (0x%s)", reason, code)
+				}
+				return "", fmt.Errorf("the PS5 refused the package: %s", reason)
+			}
+			return "", fmt.Errorf("the PS5 refused the package: %s", msg)
+		case strings.HasPrefix(line, "p "):
+			var done, total int64
+			var status string
+			fmt.Sscanf(line, "p %d %d %s", &done, &total, &status)
+			a.mu.Lock()
+			if total > 0 {
+				j.Pct = int(done * 1000 / total)
+			}
+			if status != "" {
+				j.Note = "Installing on the PS5 (" + status + ")"
+			}
+			a.mu.Unlock()
+		}
+		if err != nil {
+			if line == "" {
+				return "", fmt.Errorf("the installer on the PS5 stopped answering: %v", shortNetErr(err))
+			}
+		}
+	}
 }

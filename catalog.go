@@ -388,21 +388,16 @@ func (a *App) storeGet(key, drive string) (string, error) {
 	return "", errors.New("That game isn't in Loadout's library any more.")
 }
 
-// dlcPkgDir is where DLC packages are copied for the PS5 app to install.
-const dlcPkgDir = "/data/loadout/pkg"
-
-// storeDLCInstall installs one of a game's DLC packages. With etaHEN's
-// package installer (DPI) answering, the PS5 fetches the package itself.
-// Otherwise the package is copied to the PS5 and the PS5 app installs it
-// (through the payload loader): the answer's Dest says where it will be,
-// and Job is the key its copy's progress shows under.
+// storeDLCInstall installs one of a game's DLC packages on the PS5, the way
+// packages from the library are installed (see pkgInstall). The answer's Job
+// is the key its progress shows under.
 func (a *App) storeDLCInstall(game, file string) (map[string]string, error) {
 	a.mu.Lock()
 	st := a.stateLocked()
 	a.toast = append(st.Toasts, a.toast...)
-	host := strings.TrimSpace(a.cfg.PS5IP)
+	noPS5 := strings.TrimSpace(a.cfg.PS5IP) == ""
 	a.mu.Unlock()
-	if host == "" {
+	if noPS5 {
 		return nil, errors.New("Set your PS5's IP address in Loadout's Settings first.")
 	}
 	for _, it := range st.Items {
@@ -423,22 +418,13 @@ func (a *App) storeDLCInstall(game, file string) (map[string]string, error) {
 			name := d.Name
 			// a fresh key each time, so an earlier run's "done" can't be mistaken for this one
 			key := fmt.Sprintf("dlc:%s#%d", d.Key, time.Now().UnixNano())
-			if c, err := net.DialTimeout("tcp", net.JoinHostPort(host, fmt.Sprint(dpiPort)), 1500*time.Millisecond); err == nil {
-				c.Close()
-				a.mu.Lock()
-				j := &BuildJob{Key: key, Kind: "pkginst", Name: name, Out: filepath.Base(d.Key), State: "queued", Size: fi.Size(), image: d.Key}
-				a.addJobsLocked([]*BuildJob{j})
-				a.enqueuePS5Locked(j)
-				a.mu.Unlock()
-				return map[string]string{"msg": "Installing " + name + ". The PS5 fetches it from your PC; watch its Downloads list.", "job": key}, nil
-			}
+			cid := contentIDRe.FindString(strings.ToUpper(filepath.Base(d.Key)))
 			a.mu.Lock()
-			j := &BuildJob{Key: key, Kind: "fxup", Name: name + " to the PS5", Out: filepath.Base(d.Key), State: "queued", Size: fi.Size(), image: d.Key, Dest: dlcPkgDir}
+			j := &BuildJob{Key: key, Kind: "pkginst", Name: name, Out: filepath.Base(d.Key), State: "queued", Size: fi.Size(), image: d.Key, contentID: cid}
 			a.addJobsLocked([]*BuildJob{j})
 			a.enqueuePS5Locked(j)
 			a.mu.Unlock()
-			return map[string]string{"msg": "Copying " + name + " to the PS5. This app installs it when it's there; keep Loadout open until it says Installed.",
-				"job": key, "dest": path.Join(dlcPkgDir, filepath.Base(d.Key))}, nil
+			return map[string]string{"msg": "Installing " + name + " on your PS5. Your PC does it, so you can leave this page.", "job": key}, nil
 		}
 		return nil, errors.New("That DLC isn't with this game any more.")
 	}
