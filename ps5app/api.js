@@ -31,7 +31,7 @@ async function call(url, options = {}) {
     headers: Object.assign({'X-Loadout-Token': config.token},
       options.body ? {'Content-Type': 'application/json'} : {}),
     body: options.body ? JSON.stringify(options.body) : undefined,
-    maxBytes: options.maxBytes || 4 * 1024 * 1024,
+    maxBytes: options.maxBytes || 1024 * 1024,
   });
   let data = {};
   try {
@@ -73,7 +73,8 @@ export function connect() {
 }
 
 export const api = {
-  games: () => call(`${base}/s/games`, {maxBytes: 16 * 1024 * 1024}),
+  // 4 MiB is PS5 React's most for one response: thousands of games
+  games: () => call(`${base}/s/games`, {maxBytes: 4 * 1024 * 1024}),
   status: () => call(`${base}/s/status`),
   download: (key, drive) => call(`${base}/s/get`, {body: {Key: key, Drive: drive}}),
 };
