@@ -30,6 +30,14 @@ param = json.load(open(p))
 param["applicationCategoryType"] = 65536  # native media app
 param["contentBadgeType"] = 2
 param.pop("gameIntent", None)
+# media apps may have at most 128 MiB page tables (the kernel refuses to launch
+# them otherwise, error 0x80020016); PS5 React asks for a game's 256 MiB
+kernel = param.setdefault("kernel", {})
+for key in ("cpuPageTableSize", "gpuPageTableSize"):
+    kernel[key] = min(kernel.get(key, 134217728), 134217728)
+amm = param.get("amm", {})
+if "pagetableMemorySizeInMib" in amm:
+    amm["pagetableMemorySizeInMib"] = min(amm["pagetableMemorySizeInMib"], 128)
 json.dump(param, open(p, "w"), indent=2)
 open(p, "a").write("\n")
 PY

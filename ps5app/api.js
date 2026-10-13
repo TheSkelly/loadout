@@ -48,23 +48,28 @@ async function call(url, options = {}) {
   return data;
 }
 
-// connect finds which of the PC's addresses answers, in the order Loadout listed them.
-export async function connect() {
-  let last = null;
-  for (const url of config.urls) {
-    try {
-      const hello = await call(`${url}/s/hello`, {maxBytes: 4096});
-      if (hello.app === 'Loadout') {
+// connect asks every address Loadout listed at once and uses the first that
+// answers: an address the PS5 can't reach (a VPN's, say) only times out.
+export function connect() {
+  return new Promise((resolve, reject) => {
+    let left = config.urls.length, last = null, done = false;
+    for (const url of config.urls) {
+      call(`${url}/s/hello`, {maxBytes: 4096}).then(hello => {
+        if (done || hello.app !== 'Loadout') throw new Error(`${url} isn't Loadout`);
+        done = true;
         base = url;
-        return hello;
-      }
-    } catch (err) {
-      if (err.unpaired) throw err;
-      last = err;
+        resolve(hello);
+      }).catch(err => {
+        if (done) return;
+        if (err.unpaired) { done = true; reject(err); return; }
+        last = err;
+        if (--left === 0) {
+          reject(new Error(`Can't reach your PC${config.pc ? ` (${config.pc})` : ''}. Make sure Loadout is running there, even if only in the tray.` +
+            (last ? `\n${last.message}` : '')));
+        }
+      });
     }
-  }
-  throw new Error(`Can't reach your PC${config.pc ? ` (${config.pc})` : ''}. Make sure Loadout is running there, even if only in the tray.` +
-    (last ? `\n${last.message}` : ''));
+  });
 }
 
 export const api = {

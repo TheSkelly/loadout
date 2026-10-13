@@ -469,6 +469,23 @@ func copyTree(src, dst string) error {
 	})
 }
 
+// localIPToward is this PC's address on the route to ip ("" if there is none).
+// Dialing UDP sends nothing; it only asks Windows which adapter it would use.
+func localIPToward(ip string) string {
+	if net.ParseIP(ip) == nil {
+		return ""
+	}
+	c, err := net.Dial("udp4", net.JoinHostPort(ip, "9"))
+	if err != nil {
+		return ""
+	}
+	defer c.Close()
+	if a, ok := c.LocalAddr().(*net.UDPAddr); ok && a.IP.To4() != nil && !a.IP.IsLoopback() {
+		return a.IP.String()
+	}
+	return ""
+}
+
 // installPS5App pairs the PS5 app and queues sending it to the PS5.
 func (a *App) installPS5App() (string, error) {
 	src := ps5AppSource()
@@ -489,12 +506,20 @@ func (a *App) installPS5App() (string, error) {
 	if port == 0 {
 		port = defaultRemotePort
 	}
-	// home network addresses first: the PS5 is on the same network as this PC
+	// first the address this PC reaches the PS5 from: a VPN or a virtual
+	// adapter (NordVPN, WSL, Hyper-V) sorts first otherwise, and the PS5
+	// can't reach those
+	a.mu.Lock()
+	ps5ip := strings.TrimSpace(a.cfg.PS5IP)
+	a.mu.Unlock()
 	ips, ts := localAddrs()
 	var urls []string
+	if route := localIPToward(ps5ip); route != "" {
+		urls = append(urls, fmt.Sprintf("http://%s:%d", route, port))
+	}
 	for _, ip := range ips {
-		if ip != ts {
-			urls = append(urls, fmt.Sprintf("http://%s:%d", ip, port))
+		if u := fmt.Sprintf("http://%s:%d", ip, port); ip != ts && (len(urls) == 0 || urls[0] != u) {
+			urls = append(urls, u)
 		}
 	}
 	if ts != "" {
