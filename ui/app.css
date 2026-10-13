@@ -35,8 +35,7 @@ input { font: inherit; color: inherit; }
 .rail { background: var(--ink-2); border-right: 1px solid var(--line-soft); display: flex; flex-direction: column; padding: 18px 12px; gap: 2px; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 2px 8px 22px; }
 .brand svg { width: 30px; height: 30px; stroke: none; }
-.brand .tagshape { fill: var(--manila); }
-.brand .hole { fill: var(--ink-2); }
+.brand .emblem { width: 34px; height: 34px; filter: drop-shadow(0 0 5px rgba(75, 156, 211, .45)); }
 .brand b { display: block; font: 600 19px/1 var(--display); letter-spacing: .01em; }
 .brand span { font-size: 12px; color: var(--faint); }
 .navbtn { display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: var(--r-s); color: var(--muted); text-align: left; }

@@ -174,9 +174,28 @@ def logo():
     img.resize((192, 192), Image.LANCZOS).save(OUT.parent / "assets" / "logo.png")
 
 
+def pc_icon():
+    """The same emblem as Loadout's Windows icon (app.ico in the project root), drawn
+    for each size Windows asks for, so the small ones stay crisp."""
+    frames = []
+    for size in (256, 128, 64, 48, 40, 32, 24, 20, 16):
+        S = size * 4
+        layer = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+        layer.alpha_composite(emblem(int(S * 0.96)), (int(S * 0.02), int(S * 0.02)))
+        img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+        if size >= 48:
+            img.alpha_composite(glow(layer, S // 40, 1.0))
+        img.alpha_composite(layer)
+        frames.append(img.resize((size, size), Image.LANCZOS))
+    ico = OUT.parent.parent / "app.ico"
+    frames[0].save(ico, format="ICO", sizes=[f.size for f in frames], append_images=frames[1:])
+    return ico
+
+
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
     icon()
     background()
     logo()
+    print("wrote", pc_icon())
     print("wrote", OUT / "icon0.png", OUT / "pic0.png", OUT.parent / "assets" / "logo.png")

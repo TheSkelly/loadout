@@ -292,7 +292,7 @@ func (a *App) checkDownloads() {
 	}
 	defer watchMu.Unlock()
 	a.mu.Lock()
-	folder, games, roms := strings.TrimSpace(a.cfg.WatchFolder), strings.TrimSpace(a.cfg.Folder), strings.TrimSpace(a.cfg.RomFolder)
+	folder, games, roms := strings.TrimSpace(a.cfg.WatchFolder), a.watchDestLocked(), strings.TrimSpace(a.cfg.RomFolder)
 	on := folder != "" && boolOr(a.cfg.WatchOn, true)
 	a.watch.On, a.watch.Folder = on, folder
 	a.mu.Unlock()
@@ -683,6 +683,55 @@ func (a *App) extractFailed(name, tmp, why string) string {
 	a.notify("%s", msg)
 	a.mu.Unlock()
 	return msg
+}
+
+// watchDestLocked is the games folder extracted PS5 games go to: the one
+// picked, while it's still one of the library's folders, else the main one.
+func (a *App) watchDestLocked() string {
+	if d := strings.TrimSpace(a.cfg.WatchDest); d != "" {
+		for _, f := range a.cfg.MoreFolders {
+			if strings.EqualFold(filepath.Clean(f), filepath.Clean(d)) {
+				if st, err := os.Stat(f); err == nil && st.IsDir() {
+					return f
+				}
+			}
+		}
+	}
+	return strings.TrimSpace(a.cfg.Folder)
+}
+
+// setWatchDest picks where extracted PS5 games go: "" or the main games
+// folder, one of the other games folders, or a new folder, which becomes one
+// of the library's games folders so the games show up.
+func (a *App) setWatchDest(p string) error {
+	p = strings.TrimSpace(p)
+	a.mu.Lock()
+	main, watch := a.cfg.Folder, a.cfg.WatchFolder
+	known := p == "" || strings.EqualFold(filepath.Clean(p), filepath.Clean(main))
+	for _, f := range a.cfg.MoreFolders {
+		if p != "" && strings.EqualFold(filepath.Clean(f), filepath.Clean(p)) {
+			known = true
+		}
+	}
+	a.mu.Unlock()
+	if p != "" && watch != "" {
+		if rel, err := filepath.Rel(watch, p); err == nil && !strings.HasPrefix(rel, "..") {
+			return errors.New("That's inside your downloads folder. Pick a folder outside it, so the games don't land where they came from.")
+		}
+	}
+	if !known {
+		if err := a.addGameFolder(p); err != nil {
+			return err
+		}
+	}
+	a.mu.Lock()
+	if strings.EqualFold(filepath.Clean(p), filepath.Clean(main)) {
+		p = ""
+	}
+	a.cfg.WatchDest = p
+	saveJSON("settings.json", a.cfg)
+	a.mu.Unlock()
+	return nil
 }
 
 // setWatchFolder sets (or clears) the downloads folder and checks it now.

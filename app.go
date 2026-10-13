@@ -36,6 +36,7 @@ type Settings struct {
 	WatchFolder  string   `json:",omitempty"` // downloads folder checked for PS5 games in archives
 	WatchOn      *bool    `json:",omitempty"`
 	AutoSendRoms bool     `json:",omitempty"` // Switch games from the downloads folder go on to ProsperoEden on the PS5
+	WatchDest    string   `json:",omitempty"` // the games folder extracted PS5 games go to ("" for the main one)
 	WatchRecycle bool     `json:",omitempty"` // send the archives to the Recycle Bin once extracted
 	ShowMissing  bool
 	Ignored      []string
@@ -2216,6 +2217,11 @@ func (a *App) handler() http.Handler {
 		var b struct{ Path string }
 		body(r, &b)
 		return nil, a.setWatchFolder(b.Path)
+	})
+	api("/api/watch/dest", func(r *http.Request) (any, error) {
+		var b struct{ Path string }
+		body(r, &b)
+		return nil, a.setWatchDest(b.Path)
 	})
 	api("/api/watch/check", func(r *http.Request) (any, error) {
 		go a.checkDownloads()

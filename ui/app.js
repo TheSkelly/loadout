@@ -1064,6 +1064,13 @@ function renderRemote() {
     $("#watchFolder").value = S.settings.WatchFolder || "";
     $("#watchOn").checked = S.settings.WatchOn !== false; $("#watchRecycle").checked = !!S.settings.WatchRecycle; $("#autoSendRoms").checked = !!S.settings.AutoSendRoms;
     $("#watchOn").disabled = $("#watchCheck").disabled = $("#watchClear").disabled = !S.settings.WatchFolder;
+    { // where extracted PS5 games go: a games folder, or another folder (which becomes one)
+      const more = S.settings.MoreFolders || [], dest = S.settings.WatchDest || "";
+      const opts = [["", `${S.settings.Folder || "Your games folder"} (main games folder)`], ...more.map(f => [f, f]), ["__pick", "Another folder…"]];
+      const h = opts.map(([v, l]) => `<option value="${esc(v)}"${v === dest ? " selected" : ""}>${esc(l)}</option>`).join("");
+      const sel = $("#watchDest");
+      if (sel.dataset.sig !== h && document.activeElement !== sel) { sel.dataset.sig = h; sel.innerHTML = h; }
+    }
     const lines = [];
     if (w.noTool) lines.push(`<p class="warnline">7-Zip isn't installed on this PC. Install it from 7-zip.org and Loadout uses it by itself.</p>`);
     if (w.busy) lines.push(`<p><b>Extracting ${esc(w.current)}</b> · ${Math.floor((w.pct || 0) / 10)}%</p>`);
@@ -1443,6 +1450,14 @@ $("#moreFolders").onclick = manageFolders;
 $("#watchPick").onclick = async () => {
   const p = await api("pick", { title: "Pick the folder your downloads go to", start: S.settings.WatchFolder || "" }).catch(e => toast(e.message, true));
   if (p) act("watch/folder", { Path: p }, "Downloads folder set. Checking it now.");
+};
+$("#watchDest").onchange = async e => {
+  let p = e.target.value;
+  if (p === "__pick") {
+    p = await api("pick", { title: "Where should extracted PS5 games go?", start: S.settings.WatchDest || S.settings.Folder || "" }).catch(err => toast(err.message, true));
+    if (!p) { e.target.dataset.sig = ""; render(); return; }
+  }
+  act("watch/dest", { Path: p }, p ? "Extracted PS5 games will go to " + p + ". It's one of your library's game folders now." : "Extracted PS5 games will go to your main games folder.");
 };
 $("#watchClear").onclick = () => act("watch/folder", { Path: "" }, "Loadout no longer checks a downloads folder.");
 $("#watchCheck").onclick = () => act("watch/check", {}, "Checking the downloads folder…");

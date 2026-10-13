@@ -191,3 +191,21 @@ func TestAutoSendRoms(t *testing.T) {
 		t.Errorf("queued to %s as %s", queued.Dest, queued.Kind)
 	}
 }
+
+func TestWatchDest(t *testing.T) {
+	main, more, dl := t.TempDir(), t.TempDir(), t.TempDir()
+	a := &App{cfg: Settings{Folder: main, MoreFolders: []string{more}, WatchFolder: dl}}
+	if got := a.watchDestLocked(); got != main {
+		t.Errorf("by default games go to %s, want the main folder", got)
+	}
+	if err := a.setWatchDest(more); err != nil || a.watchDestLocked() != more {
+		t.Errorf("picking another games folder: err=%v, games go to %s", err, a.watchDestLocked())
+	}
+	if err := a.setWatchDest(filepath.Join(dl, "games")); err == nil {
+		t.Error("a folder inside the downloads folder was accepted")
+	}
+	a.cfg.MoreFolders = nil // that folder isn't one of the library's any more
+	if got := a.watchDestLocked(); got != main {
+		t.Errorf("with its folder gone, games go to %s, want the main folder", got)
+	}
+}
