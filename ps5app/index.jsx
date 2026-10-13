@@ -6,7 +6,7 @@
 //
 // Built with PS5 React (GPL-3.0-or-later); see NOTICE in the app folder.
 import {memo, useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {AppRegistry, View, Text, Image, ScrollView, VirtualList, FocusScope, useIsFocused, useController} from '@ps5-react/core';
+import {AppRegistry, View, Text, Image, ScrollView, VirtualList, FocusScope, useIsFocused, useController, Packages, FileSystem} from '@ps5-react/core';
 import {loadConfig, connect, api, art} from './api.js';
 import logo from './assets/logo.png';
 
@@ -513,15 +513,28 @@ function Row({title, sub, children}) {
   );
 }
 
-function DLCSection({game, progress, say}) {
+// where a DLC install is: the PC copying it (or handing it to DPI), then this app installing it
+function dlcLine(inst, p) {
+  if (!inst) return {text: '', busy: false};
+  if (inst.state === 'done') return {text: 'Installed', busy: false, done: true};
+  if (inst.state === 'failed') return {text: `Failed: ${inst.note}`, busy: false};
+  if (inst.state === 'installing') return {text: `Installing on the PS5${inst.pct ? ` ${inst.pct}%` : '…'}${inst.status ? ` (${inst.status})` : ''}`, busy: true};
+  if (!inst.dest) { // etaHEN's installer fetches it
+    if (p && p.state === 'sent') return {text: 'Sent: the PS5 finishes installing it in its Downloads list', busy: false, done: true};
+    if (p && p.state === 'failed') return {text: `Failed: ${p.note}`, busy: false};
+    return {text: `Sending to the PS5's installer${p && p.pct ? ` ${Math.floor(p.pct / 10)}%` : '…'}`, busy: true};
+  }
+  return {text: `Copying to the PS5${p && p.pct ? ` ${Math.floor(p.pct / 10)}%` : '…'}`, busy: true};
+}
+
+function DLCSection({game, progress, installs, startDLC, say}) {
   const list = game.dlc || [];
   const [ask, setAsk] = useState(null);
   if (!list.length) return null;
   const install = async d => {
-    say({text: `Asking your PC to install ${d.name}…`});
+    say({text: `Asking your PC for ${d.name}…`});
     try {
-      const r = await api.dlcInstall(game.key, d.key);
-      say({text: (r.data && r.data.msg) || 'Installing.'});
+      say({text: await startDLC(d)});
     } catch (err) {
       say({text: err.message, bad: true});
     }
@@ -530,16 +543,16 @@ function DLCSection({game, progress, say}) {
     <View scrollAnchor className="gap-[10px] pt-[26px] px-[64px]">
       <Heading title="DLC" note={`${list.length} on your PC`} pad={0} />
       {list.map(d => {
-        const p = progress[`dlc:${d.key}`];
-        const sub = [d.kind, size(d.size), busy(p) ? `${WORD[p.state] || 'Installing'}${p.pct ? ` ${Math.floor(p.pct / 10)}%` : ''}` : p && p.state === 'sent' ? 'Sent to the PS5: it finishes installing in its Downloads list' : p && p.state === 'failed' ? `Failed: ${p.note}` : '',
-          d.pkg ? '' : 'Only .pkg DLC installs from here'].filter(Boolean).join('   ·   ');
+        const inst = installs[d.key];
+        const line = dlcLine(inst, inst && progress[inst.job]);
+        const sub = [d.kind, size(d.size), line.text, d.pkg ? '' : 'Only .pkg DLC installs from here'].filter(Boolean).join('   ·   ');
         return (
           <Row key={d.key} title={d.name} sub={sub}>
-            <Button small primary={d.pkg && !busy(p)} disabled={!d.pkg || busy(p)} label={busy(p) ? 'Installing…' : p && p.state === 'sent' ? 'Install again' : 'Install'} onPress={() => setAsk(d)} />
+            <Button small primary={d.pkg && !line.busy && !line.done} disabled={!d.pkg || line.busy} label={line.busy ? 'Working…' : line.done ? 'Install again' : 'Install'} onPress={() => setAsk(d)} />
           </Row>
         );
       })}
-      {ask ? <Confirm title={`Install ${ask.name}?`} body="Your PS5 downloads the package from your PC and installs it. etaHEN's package installer (DPI) needs to be on." yes="Install" onYes={() => install(ask)} onClose={() => setAsk(null)} /> : null}
+      {ask ? <Confirm title={`Install ${ask.name}?`} body="Your PC copies the package to the PS5 and this app installs it. Keep Loadout open on the PS5 until it says Installed." yes="Install" onYes={() => install(ask)} onClose={() => setAsk(null)} /> : null}
     </View>
   );
 }
@@ -598,7 +611,7 @@ function SavesSection({game, progress, say}) {
   );
 }
 
-function Detail({game, status, progress, drive, setDrive, onBack, onDownload, message}) {
+function Detail({game, status, progress, installs, startDLC, drive, setDrive, onBack, onDownload, message}) {
   const [shot, setShot] = useState(-1);
   const [note, setNote] = useState(null);
   const prog = progress[game.key];
@@ -666,7 +679,7 @@ function Detail({game, status, progress, drive, setDrive, onBack, onDownload, me
             ) : null}
             {shown ? <Text className="font-inter text-sm" style={{color: shown.bad ? C.coral : C.sky}}>{shown.text}</Text> : null}
           </View>
-          <DLCSection game={game} progress={progress} say={setNote} />
+          <DLCSection game={game} progress={progress} installs={installs} startDLC={d => startDLC(game, d)} say={setNote} />
           <SavesSection game={game} progress={progress} say={setNote} />
           {shots ? (
             <View scrollAnchor className="gap-[4px] pt-[28px]">
@@ -763,6 +776,46 @@ function App() {
   const openGame = useCallback(key => { setMessage(null); setOpen(key); }, []);
   const back = useCallback(() => setOpen(null), []);
   const pickRom = useCallback(r => { setRomNote(null); setRom(r); }, []);
+
+  // DLC installs: the PC copies the package to the PS5, then it's installed
+  // from here (the console's installer, through the payload loader), one at a time
+  const [installs, setInstalls] = useState({});
+  const installing = useRef(false);
+  const patch = (key, change) => setInstalls(m => ({...m, [key]: {...m[key], ...change}}));
+  const startDLC = useCallback(async (game, d) => {
+    const r = await api.dlcInstall(game.key, d.key);
+    const data = r.data || {};
+    setInstalls(m => ({...m, [d.key]: {job: data.job, dest: data.dest || '', name: d.name, state: 'copying'}}));
+    refresh();
+    return data.msg || 'Started.';
+  }, []);
+  useEffect(() => {
+    for (const [key, inst] of Object.entries(installs)) {
+      const p = inst.state === 'copying' ? progress[inst.job] : null;
+      if (p && p.state === 'failed') patch(key, {state: 'failed', note: p.note || 'the copy failed'});
+      if (p && p.state === 'sent' && !inst.dest) patch(key, {state: 'done'});
+    }
+    if (installing.current) return;
+    const next = Object.entries(installs).find(([, inst]) => inst.state === 'copying' && inst.dest && progress[inst.job] && progress[inst.job].state === 'sent');
+    if (!next) return;
+    const [key, inst] = next;
+    installing.current = true;
+    patch(key, {state: 'installing', pct: 0});
+    let task;
+    try {
+      task = Packages.install({path: inst.dest, name: inst.name});
+    } catch (err) {
+      installing.current = false;
+      patch(key, {state: 'failed', note: err.message});
+      return;
+    }
+    const stop = task.subscribe(snap => patch(key, {status: snap.status || '', pct: snap.total ? Math.floor(snap.written * 100 / snap.total) : 0}));
+    task.done.then(() => {
+      patch(key, {state: 'done'});
+      try { FileSystem.remove(inst.dest); } catch (err) { /* left behind; replaced next time */ }
+    }).catch(err => patch(key, {state: 'failed', note: err.message || 'the PS5 refused it'}))
+      .finally(() => { stop(); installing.current = false; setInstalls(m => ({...m})); });
+  }, [installs, progress]);
   // the note about a ROM download fades after a while
   useEffect(() => {
     if (!romNote || rom) return undefined;
@@ -822,7 +875,7 @@ function App() {
       </FocusScope>
       {game ? (
         <View className="absolute inset-0">
-          <Detail game={game} status={status} progress={progress} drive={drive} setDrive={setDrive}
+          <Detail game={game} status={status} progress={progress} installs={installs} startDLC={startDLC} drive={drive} setDrive={setDrive}
             onBack={back} onDownload={download} message={message} />
         </View>
       ) : null}

@@ -388,16 +388,22 @@ func (a *App) storeGet(key, drive string) (string, error) {
 	return "", errors.New("That game isn't in Loadout's library any more.")
 }
 
-// storeDLCInstall has the PS5 install one of a game's DLC packages, the way
-// a PS4 package from the library is installed (etaHEN's package installer).
-func (a *App) storeDLCInstall(game, file string) (string, error) {
+// dlcPkgDir is where DLC packages are copied for the PS5 app to install.
+const dlcPkgDir = "/data/loadout/pkg"
+
+// storeDLCInstall installs one of a game's DLC packages. With etaHEN's
+// package installer (DPI) answering, the PS5 fetches the package itself.
+// Otherwise the package is copied to the PS5 and the PS5 app installs it
+// (through the payload loader): the answer's Dest says where it will be,
+// and Job is the key its copy's progress shows under.
+func (a *App) storeDLCInstall(game, file string) (map[string]string, error) {
 	a.mu.Lock()
 	st := a.stateLocked()
 	a.toast = append(st.Toasts, a.toast...)
-	noPS5 := strings.TrimSpace(a.cfg.PS5IP) == ""
+	host := strings.TrimSpace(a.cfg.PS5IP)
 	a.mu.Unlock()
-	if noPS5 {
-		return "", errors.New("Set your PS5's IP address in Loadout's Settings first.")
+	if host == "" {
+		return nil, errors.New("Set your PS5's IP address in Loadout's Settings first.")
 	}
 	for _, it := range st.Items {
 		if it.Key != game {
@@ -408,23 +414,35 @@ func (a *App) storeDLCInstall(game, file string) (string, error) {
 				continue
 			}
 			if !d.Pkg {
-				return "", errors.New("Only DLC that comes as a .pkg file can be installed from here.")
+				return nil, errors.New("Only DLC that comes as a .pkg file can be installed from here.")
 			}
 			fi, err := os.Stat(d.Key)
 			if err != nil {
-				return "", errors.New("That DLC file isn't on your PC any more.")
+				return nil, errors.New("That DLC file isn't on your PC any more.")
 			}
 			name := d.Name
+			// a fresh key each time, so an earlier run's "done" can't be mistaken for this one
+			key := fmt.Sprintf("dlc:%s#%d", d.Key, time.Now().UnixNano())
+			if c, err := net.DialTimeout("tcp", net.JoinHostPort(host, fmt.Sprint(dpiPort)), 1500*time.Millisecond); err == nil {
+				c.Close()
+				a.mu.Lock()
+				j := &BuildJob{Key: key, Kind: "pkginst", Name: name, Out: filepath.Base(d.Key), State: "queued", Size: fi.Size(), image: d.Key}
+				a.addJobsLocked([]*BuildJob{j})
+				a.enqueuePS5Locked(j)
+				a.mu.Unlock()
+				return map[string]string{"msg": "Installing " + name + ". The PS5 fetches it from your PC; watch its Downloads list.", "job": key}, nil
+			}
 			a.mu.Lock()
-			j := &BuildJob{Key: "dlc:" + d.Key, Kind: "pkginst", Name: name, Out: filepath.Base(d.Key), State: "queued", Size: fi.Size(), image: d.Key}
+			j := &BuildJob{Key: key, Kind: "fxup", Name: name + " to the PS5", Out: filepath.Base(d.Key), State: "queued", Size: fi.Size(), image: d.Key, Dest: dlcPkgDir}
 			a.addJobsLocked([]*BuildJob{j})
 			a.enqueuePS5Locked(j)
 			a.mu.Unlock()
-			return "Installing " + name + ". The PS5 fetches it from your PC; watch its Downloads list.", nil
+			return map[string]string{"msg": "Copying " + name + " to the PS5. This app installs it when it's there; keep Loadout open until it says Installed.",
+				"job": key, "dest": path.Join(dlcPkgDir, filepath.Base(d.Key))}, nil
 		}
-		return "", errors.New("That DLC isn't with this game any more.")
+		return nil, errors.New("That DLC isn't with this game any more.")
 	}
-	return "", errors.New("That game isn't in Loadout's library any more.")
+	return nil, errors.New("That game isn't in Loadout's library any more.")
 }
 
 // storeSaves is one game's saves on the PS5 and its backups on this PC. The
@@ -620,8 +638,7 @@ func (a *App) storeRoutes(mux *http.ServeMux, rs *remoteServer, writeJSON func(h
 	mux.HandleFunc("/s/dlc/install", post(func(r *http.Request) (any, error) {
 		var b struct{ Game, File string }
 		json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&b)
-		msg, err := a.storeDLCInstall(b.Game, b.File)
-		return map[string]string{"msg": msg}, err
+		return a.storeDLCInstall(b.Game, b.File)
 	}))
 	mux.HandleFunc("/s/saves", get(func(r *http.Request) any {
 		return a.storeSaves(r.URL.Query().Get("id"))
