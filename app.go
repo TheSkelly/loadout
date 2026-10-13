@@ -37,6 +37,7 @@ type Settings struct {
 	WatchOn      *bool    `json:",omitempty"`
 	AutoSendRoms bool     `json:",omitempty"` // Switch games from the downloads folder go on to ProsperoEden on the PS5
 	WatchDest    string   `json:",omitempty"` // the games folder extracted PS5 games go to ("" for the main one)
+	SendFolders  bool     `json:",omitempty"` // downloads from the PS5 app send game folders, not exFAT images
 	WatchRecycle bool     `json:",omitempty"` // send the archives to the Recycle Bin once extracted
 	ShowMissing  bool
 	Ignored      []string
@@ -1684,6 +1685,9 @@ func (a *App) handler() http.Handler {
 				a.cfg.PS5Port = 2121
 			}
 		}
+		if v := flag("sendFolders"); v != nil {
+			a.cfg.SendFolders = *v
+		}
 		if v := flag("sendAfter"); v != nil {
 			a.cfg.SendAfter = *v
 		}
@@ -2064,6 +2068,18 @@ func (a *App) handler() http.Handler {
 		return nil, a.startPS5Move(b.Paths, b.Drive)
 	})
 	a.fxRoutes(api, func(r *http.Request, v any) { body(r, v) })
+	api("/api/sendfolder", func(r *http.Request) (any, error) {
+		var b struct {
+			Keys  []string
+			Drive string
+		}
+		body(r, &b)
+		var items []sendItem
+		for _, k := range b.Keys {
+			items = append(items, sendItem{Key: k, Drive: b.Drive})
+		}
+		return nil, a.startSendFolder(items)
+	})
 	api("/api/pkg/install", func(r *http.Request) (any, error) {
 		var b struct{ Key string }
 		body(r, &b)

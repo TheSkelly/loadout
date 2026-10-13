@@ -330,7 +330,7 @@ func (a *App) storeProgressLocked() map[string]storeProgress {
 			default:
 				p = storeProgress{State: "failed", Note: j.Note}
 			}
-		case j.Kind == "send":
+		case j.Kind == "send" || j.Kind == "sendfolder":
 			p = storeProgress{State: j.State, Pct: j.Pct, Note: j.Note}
 			if p.State == "done" {
 				p.State = "sent"
@@ -429,6 +429,9 @@ func (a *App) storeGet(key, drive string) (string, error) {
 	if s := busy.State; s != "" && s != "sent" && s != "failed" {
 		return "", errors.New("That game is already downloading.")
 	}
+	a.mu.Lock()
+	folders := a.cfg.SendFolders
+	a.mu.Unlock()
 	for _, it := range st.Items {
 		if it.Key != key || it.IsDLC || it.IsFile {
 			continue
@@ -436,6 +439,12 @@ func (a *App) storeGet(key, drive string) (string, error) {
 		name := it.Name
 		if name == "" {
 			name = it.Current
+		}
+		if folders && it.Present && it.CanBuild {
+			if err := a.startSendFolder([]sendItem{{Key: key, Drive: drive}}); err != nil {
+				return "", err
+			}
+			return "Downloading " + name + " as a game folder.", nil
 		}
 		if it.Image != "" {
 			if err := a.startSend([]sendItem{{Key: key, Name: name, Image: it.Image, Drive: drive}}); err != nil {

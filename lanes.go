@@ -197,6 +197,8 @@ func (a *App) runPS5Job(j *BuildJob) {
 			note, err = a.fxCopy(j)
 		case "build":
 			note, err = a.sendImage(j, j.output)
+		case "sendfolder":
+			note, err = a.sendFolder(j)
 		default: // "send"
 			note, err = a.sendImage(j, j.image)
 		}
