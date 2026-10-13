@@ -1248,7 +1248,7 @@ function toast(msg, bad) {
 // more folders with games: the library reads all of them
 async function manageFolders() {
   const more = S.settings.MoreFolders || [];
-  const r = await modal(`<h3>Game folders</h3><p>Loadout reads games from every folder here. The main folder is the one at the top of the window; renaming and DLC work inside each folder. A folder on a drive that isn't plugged in is skipped until it's back.</p>
+  const r = await modal(`<h3>Game folders</h3><p>Loadout reads games from every folder here, and each works like the main one: game folders inside it, and an <b>exFAT Images</b> folder in it for the images built from them (made the first time one is built). Images already in a folder's exFAT Images show up too. Renaming and DLC work inside each folder. A folder on a drive that isn't plugged in is skipped until it's back.</p>
     <ul class="ftplist"><li><button disabled>${ICON.folder}<span><b>${esc(S.settings.Folder)}</b> (main)</span></button></li>
     ${more.map(f => `<li><button data-pick="${esc(f)}" title="Stop reading games from this folder">${ICON.folder}<span>${esc(f)}</span><span class="grow"></span>${ICON.trash}Remove</button></li>`).join("")}</ul>`,
     [{ label: "Done" }, { label: "Add a folder", cls: "primary" }]);

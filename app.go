@@ -70,10 +70,10 @@ type Settings struct {
 	RemotePIN    string
 	StoreDevices []StoreDevice `json:",omitempty"` // PS5 apps paired with the PIN
 	AlertNtfy    string        // ntfy topic or full URL
-	AlertDiscord string // Discord webhook URL
-	KeepAwake    *bool  // keep the PC awake while jobs run
-	PS5AppAuto   *bool  // send new builds of the PS5 app to the PS5 by themselves
-	CloseToTray  *bool  // closing the window hides it in the tray
+	AlertDiscord string        // Discord webhook URL
+	KeepAwake    *bool         // keep the PC awake while jobs run
+	PS5AppAuto   *bool         // send new builds of the PS5 app to the PS5 by themselves
+	CloseToTray  *bool         // closing the window hides it in the tray
 	// old fields kept so settings from 1.x load cleanly
 	Format     int  `json:",omitempty"`
 	AddVersion bool `json:",omitempty"`
@@ -102,7 +102,8 @@ type BuildJob struct {
 	gen       int32  // PS5 lane stop counter when this job was queued
 	only      string // a ZIP install that must be this one app folder (an update)
 	save      *PS5Save
-	contentID string // pkginst: the package's content ID, needed for PS5 packages
+	contentID string             // pkginst: the package's content ID, needed for PS5 packages
+	outDir    string             // build: where its image goes ("" for the main image folder)
 	sums      map[string]FileSum // checksums from this run's build, for the check
 	backup    *SaveBackup
 
@@ -868,6 +869,19 @@ func (a *App) startScan(folder string) error {
 	return nil
 }
 
+// imageDirForLocked is where a game's image is built: a game from one of the
+// extra folders gets that folder's own "exFAT Images", like the main folder
+// has, and every other game goes to the main image folder.
+func (a *App) imageDirForLocked(g *Game) string {
+	root := filepath.Clean(filepath.Dir(g.Path))
+	for _, f := range a.cfg.MoreFolders {
+		if strings.EqualFold(filepath.Clean(f), root) {
+			return filepath.Join(f, "exFAT Images")
+		}
+	}
+	return a.outDir()
+}
+
 // gameFoldersLocked is the main games folder, then the others, without
 // repeats. A folder that isn't there right now (an unplugged drive) is left
 // out, so its games aren't marked missing.
@@ -1175,7 +1189,8 @@ func (a *App) startBuild(keys, sendKeys []string, dests map[string]string, overw
 			skippedSending++
 			continue
 		}
-		cleanOut := strings.ToLower(filepath.Clean(out) + string(os.PathSeparator))
+		jout := a.imageDirForLocked(g)
+		cleanOut := strings.ToLower(filepath.Clean(jout) + string(os.PathSeparator))
 		if strings.HasPrefix(cleanOut, strings.ToLower(filepath.Clean(g.Path)+string(os.PathSeparator))) {
 			return fmt.Errorf("The image folder is inside \"%s\". Pick an output folder outside your game folders.", g.Current)
 		}
@@ -1185,6 +1200,9 @@ func (a *App) startBuild(keys, sendKeys []string, dests map[string]string, overw
 		}
 		j := &BuildJob{Key: k, Kind: "build", Name: g.Name, Out: a.imageNameFor(g), State: "queued", Size: size, game: g,
 			Send: send[k] && strings.TrimSpace(a.cfg.PS5IP) != ""}
+		if jout != out {
+			j.outDir = jout
+		}
 		if j.Send {
 			j.Dest, j.DestLabel = a.destLocked(dests[k])
 			j.SendState = "waiting"
@@ -1199,6 +1217,13 @@ func (a *App) startBuild(keys, sendKeys []string, dests map[string]string, overw
 	}
 	if err := os.MkdirAll(out, 0755); err != nil {
 		return fmt.Errorf("Couldn't create the output folder: %v", err)
+	}
+	for _, j := range jobs {
+		if j.outDir != "" {
+			if err := os.MkdirAll(j.outDir, 0755); err != nil {
+				return fmt.Errorf("Couldn't create %s: %v", j.outDir, err)
+			}
+		}
 	}
 	a.cfg.ImageOut = out
 	a.rememberImageDirLocked(out)
@@ -1358,7 +1383,11 @@ func (a *App) runBuild(jobs []*BuildJob, out string, overwrite, removeAfter bool
 			set(j, state, note)
 			continue
 		}
-		dst := filepath.Join(out, j.Out)
+		jout := out
+		if j.outDir != "" {
+			jout = j.outDir
+		}
+		dst := filepath.Join(jout, j.Out)
 		if _, err := os.Stat(dst); err == nil && !overwrite {
 			set(j, "skipped", "Image already exists")
 			skipped++
@@ -1376,13 +1405,13 @@ func (a *App) runBuild(jobs []*BuildJob, out string, overwrite, removeAfter bool
 			failed++
 			continue
 		}
-		if free := diskFree(out); free >= 0 && free < plan.TotalBytes+(256<<20) {
+		if free := diskFree(jout); free >= 0 && free < plan.TotalBytes+(256<<20) {
 			set(j, "failed", fmt.Sprintf("Not enough space: needs %s, %s free", humanSize(plan.TotalBytes), humanSize(free)))
 			failed++
 			continue
 		}
 		tmp := dst + ".building"
-		plan.SameDisk = sameDrive(j.game.Meta.Root, out)
+		plan.SameDisk = sameDrive(j.game.Meta.Root, jout)
 		jobStart := time.Now()
 		var last time.Time
 		err = plan.Write(tmp, func(done, total int64, cur string) {
@@ -2219,14 +2248,19 @@ func (a *App) serve() (string, error) {
 
 // cleanTemp removes unfinished images left by a crash or forced quit.
 func (a *App) cleanTemp() {
-	out := a.outDir()
-	if out == "" {
-		return
+	dirs := []string{a.outDir()}
+	for _, f := range a.cfg.MoreFolders {
+		dirs = append(dirs, filepath.Join(f, "exFAT Images"))
 	}
-	ents, _ := os.ReadDir(out)
-	for _, e := range ents {
-		if strings.HasSuffix(e.Name(), ".exfat.building") {
-			os.Remove(filepath.Join(out, e.Name()))
+	for _, out := range dirs {
+		if out == "" {
+			continue
+		}
+		ents, _ := os.ReadDir(out)
+		for _, e := range ents {
+			if strings.HasSuffix(e.Name(), ".exfat.building") {
+				os.Remove(filepath.Join(out, e.Name()))
+			}
 		}
 	}
 }

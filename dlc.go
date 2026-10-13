@@ -330,6 +330,9 @@ func sceneName(s string) string {
 // what it's called. found reports whether anything inside looked like DLC.
 func identifyDLCFolder(p, name string) (DLC, bool) {
 	d := DLC{Path: p, File: name, Kind: "Folder"}
+	if !hasAnyFile(p) {
+		return d, false // empty folders (left behind by a move) aren't DLC
+	}
 	found := false
 	var names []string
 	inner := findDLCInside(p, "")
@@ -388,6 +391,12 @@ func identifyDLCFolder(p, name string) (DLC, bool) {
 	})
 	if pkgName != "" {
 		names = append(names, sceneName(pkgName))
+	}
+	// a folder that only wraps another DLC folder (Some DLC\DLC\Real DLC name)
+	for _, x := range inner {
+		if x.Kind == "Folder" && x.Path != p && x.Name != "" {
+			names = append(names, x.Name)
+		}
 	}
 	names = append(names, sceneName(name))
 	for _, n := range names {
@@ -470,9 +479,21 @@ func shortDLCName(raw, game string) string {
 		}
 	}
 	s = dlcFillerRe.ReplaceAllString(s, " ")
+	// a name Loadout made itself ("GAME [PPSA01234] DLC - Name") comes back as
+	// just its Name: the title ID, a version and runs of separators go, or
+	// each rename would wrap the last one again
+	s = dlcIDTagRe.ReplaceAllString(s, " ")
+	s = dlcVerTagRe.ReplaceAllString(s, " ")
+	s = dlcSepRunRe.ReplaceAllString(s, " - ")
 	s = strings.Join(strings.Fields(s), " ")
 	return strings.Trim(s, " -:_.")
 }
+
+var (
+	dlcIDTagRe  = regexp.MustCompile(`[\[(]?\b[A-Z]{4}\d{5}\b[\])]?`)
+	dlcVerTagRe = regexp.MustCompile(`(?i)\bv\d+(\.\d+)*\b`)
+	dlcSepRunRe = regexp.MustCompile(`\s*[-_:.]+(\s*[-_:.]+)+\s*`)
+)
 
 func buildDLCName(o NameOpts, game, id string, d DLC) string {
 	pat := o.DLCPattern
@@ -515,4 +536,17 @@ func buildDLCName(o NameOpts, game, id string, d DLC) string {
 		out = safeName(out)
 	}
 	return out
+}
+
+// hasAnyFile says whether a folder holds at least one file, at any depth.
+func hasAnyFile(dir string) bool {
+	found := false
+	filepath.WalkDir(dir, func(_ string, e os.DirEntry, err error) error {
+		if err == nil && !e.IsDir() {
+			found = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return found
 }

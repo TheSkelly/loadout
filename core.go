@@ -743,7 +743,7 @@ func looseDLC(p, name string) (DLC, bool) {
 		return d, true
 	}
 	d, found := identifyDLCFolder(p, name)
-	if found || isDLCName(name) {
+	if found || (isDLCName(name) && hasAnyFile(p)) { // an empty folder named DLC isn't
 		return d, true
 	}
 	return DLC{}, false
@@ -807,6 +807,9 @@ func scan(root string, saved, known map[string]string, ignored []string) ([]*Gam
 		}
 		m, ok := readMeta(p)
 		if !ok {
+			if !hasAnyFile(p) {
+				continue // an empty folder (say, left behind by a move) is neither a game nor DLC
+			}
 			if d, isDLC := looseDLC(p, nm); isDLC {
 				games = append(games, &Game{Path: p, Current: nm, TitleID: d.TitleID, Name: d.Name, IsDLC: true, DLCInfo: d})
 				continue
