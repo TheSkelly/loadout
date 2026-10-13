@@ -1,4 +1,5 @@
 # build output
 Loadout.exe
+*.exe~
 Loadout-Setup-*.exe
 *.syso
