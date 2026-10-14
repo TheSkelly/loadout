@@ -1005,7 +1005,7 @@ function renderDock() {
       <div class="track"><i style="width:${overallPct() / 10}%"></i></div>
       ${b.building ? `<button class="btn danger sm" data-act="stopbuild">Stop</button>` : `<span></span>`}</div>`);
   }
-  const pjobs = jobs.filter(x => (x.kind === "build" && x.send) || ["send", "sendfolder", "ps5del", "ps5move", "savebak", "saverest", "savedel", "fxup", "fxdown", "fxupdir", "fxzip", "fxzipflat", "pkginst"].includes(x.kind));
+  const pjobs = jobs.filter(x => (x.kind === "build" && x.send) || ["send", "sendfolder", "ps5del", "ps5move", "savebak", "saverest", "savedel", "fxup", "fxdown", "fxupdir", "fxzip", "fxzipflat", "pkginst", "hbinst", "hbdel"].includes(x.kind));
   if (pjobs.length) {
     const fin = ["sent", "done", "failed", "cancelled", "skipped"];
     const doneN = pjobs.filter(x => fin.includes(ps5State(x))).length;
@@ -1456,6 +1456,8 @@ function showView(v) {
   }
   if (v === "payloads" && S && S.settings.PS5IP && !AUTO) autoScan();
   if (v === "profiles") renderProfiles();
+  if (v === "console") { renderConsole(); if (S && S.settings.PS5IP) api("ps5/drives", {}).then(() => poll(true)).catch(() => {}); }
+  if (v === "store") { renderStore(); if (!BREW) brewLoad(false); }
   if (v === "emu" && S && S.settings.PS5IP) emuLoad(); else if (v === "emu") renderEmu();
   if (v === "files" || v === "homebrew") { FX.mode = v === "homebrew" ? "homebrew" : "games"; FX.entries = []; FX.roots = []; if (S && S.settings.PS5IP) fxLoad(FX.dirs[FX.mode] || ""); else renderFiles(); }
   if (v === "saves" && S && S.settings.PS5IP && Date.now() - lastSavePeek > 15000) { lastSavePeek = Date.now(); api("saves/scan", {}).then(() => poll(true)).catch(() => {}); }
@@ -1886,3 +1888,144 @@ window.addEventListener("drop", async e => {
   }
   emuGames();
 });
+
+// ---------------- Your PS5: the console at a glance ----------------
+let CLEAN = null; // the last cleanup scan: {items, kept}
+let cleanBusy = false;
+function renderConsole() {
+  if (view !== "console" || !S) return;
+  const p = S.ps5 || {}, on = !!p.online;
+  const conn = $("#consoleConn");
+  conn.className = "conn" + (on ? " on" : "");
+  conn.textContent = !S.settings.PS5IP ? "No PS5 set" : on ? "Connected" : "Not reachable";
+  const live = ["sending", "copying", "moving", "deleting", "saving", "restoring"];
+  const own = j => j.kind !== "build" && j.kind !== "remove" && j.kind !== "unpack";
+  const now = S.build.jobs.filter(j => (own(j) && live.includes(j.state)) || (j.kind === "build" && j.send && j.sendState === "sending"));
+  const waiting = S.build.jobs.filter(j => own(j) && ["queued", "paused"].includes(j.state)).length;
+  const meter = pct => `<div class="meter"><i style="width:${Math.max(0, Math.min(100, pct))}%"></i></div>`;
+  const items = (CLEAN && CLEAN.items) || [];
+  const total = items.reduce((n, it) => n + (it.size > 0 ? it.size : 0), 0);
+  $("#consoleCards").innerHTML = `
+    <section class="card">
+      <h3>Connection<small>${S.settings.PS5IP ? `<button class="btn ghost sm" data-con="refresh">Refresh status</button>` : ""}</small></h3>
+      <div class="big">${esc(S.settings.PS5IP || "No PS5 yet")}${S.settings.PS5IP ? `<span class="muted" style="font-size:14px">:${esc(S.settings.PS5Port || 2121)}</span>` : ""}</div>
+      <div class="muted">${!S.settings.PS5IP ? "Set your PS5's IP address in Settings." : on ? "Ready for transfers over FTP." : "Loadout can't reach it. Turn the PS5 on and start its FTP server."}</div>
+      <div class="muted">Loadout ${esc(S.version)}${p.spaceFrom ? ` · free space from ${esc(p.spaceFrom)}` : ""}</div>
+    </section>
+    <section class="card">
+      <h3>Send games to<small>for new sends</small></h3>
+      ${drives().length ? drives().map(d => `<button class="choice" data-con="drive" data-root="${esc(d.root)}" aria-pressed="${d.root === defDrive()}"><span class="dot"></span><span><b>${esc(d.label || d.short)}</b><small>${d.free >= 0 ? size(d.free) + " free" : "free space unknown"}</small></span></button>`).join("")
+        : `<div class="muted">Loadout hasn't read the PS5's drives yet.</div>`}
+    </section>
+    <section class="card">
+      <h3>Storage<small>${drives().length} drive${drives().length === 1 ? "" : "s"}</small></h3>
+      ${drives().map(d => `<div><div class="crow"><b>${esc(d.label || d.short)}</b><span class="end">${d.free >= 0 ? size(d.free) + " free" : ""}</span></div>
+        ${meter(d.total > 0 && d.free >= 0 ? (d.total - d.free) * 100 / d.total : 0)}<small class="muted">${d.total > 0 ? size(d.total) + " total" : ""}</small></div>`).join("")}
+    </section>
+    <section class="card">
+      <h3>Active transfers<small><button class="btn ghost sm" data-con="queue">Open queue</button></small></h3>
+      ${now.length ? now.map(j => { const pct = (j.kind === "build" ? j.sendPct : j.pct) || 0; return `<div><div class="crow"><b>${esc(j.name)}</b><span class="end muted">${esc(j.state === "sending" || j.kind === "build" ? "Transferring" : j.state)}</span></div>
+        ${meter(pct / 10)}<small class="muted">${Math.floor(pct / 10)}%${j.note ? " · " + esc(j.note) : ""}</small></div>`; }).join("") : `<div class="muted">Nothing is going to the PS5.</div>`}
+      ${waiting ? `<div class="muted">${waiting} waiting or paused</div>` : ""}
+    </section>
+    <section class="card">
+      <h3>Clean up drives<small>${CLEAN ? `${items.length} found` : ""}</small></h3>
+      <div class="muted">Finds what stopped copies leave on the PS5: unfinished uploads (PS5Upload's .ava-part files take a whole game's space), game folders with no sce_sys/param.json, empty images and Loadout's own leftovers.</div>
+      ${items.length ? `<div class="cleanlist">${items.map(it => `<div><b>${esc(it.path.split("/").pop())}</b><small>${esc([it.reason, it.drive, it.size > 0 ? size(it.size) : ""].filter(Boolean).join(" · "))}</small><small class="mono">${esc(it.path)}</small></div>`).join("")}</div>` : CLEAN ? `<div style="color:var(--mint)">Nothing to clean up.</div>` : ""}
+      ${CLEAN && CLEAN.kept ? `<small class="muted">${CLEAN.kept} unfinished file${CLEAN.kept === 1 ? " is" : "s are"} kept: a queued or paused send still needs ${CLEAN.kept === 1 ? "it" : "them"}.</small>` : ""}
+      <div class="crow"><button class="btn ghost" data-con="scan" ${cleanBusy || !on ? "disabled" : ""}>${cleanBusy ? "Working…" : CLEAN ? "Scan again" : "Scan the drives"}</button>
+        ${items.length ? `<button class="btn danger" data-con="clean" ${cleanBusy ? "disabled" : ""}>Delete ${items.length}${total ? " (" + size(total) + ")" : ""}</button>` : ""}</div>
+    </section>`;
+}
+$("#consoleCards").addEventListener("click", async e => {
+  const b = e.target.closest("[data-con]");
+  if (!b) return;
+  switch (b.dataset.con) {
+    case "refresh": api("ps5/drives", {}).then(() => poll(true)).catch(err => toast(err.message, true)); return;
+    case "queue": return showQueue();
+    case "drive": return act("settings", { ps5Drive: b.dataset.root });
+    case "scan":
+      cleanBusy = true; renderConsole();
+      try { CLEAN = await api("cleanup/scan", {}); } catch (err) { toast(err.message, true); }
+      cleanBusy = false; return renderConsole();
+    case "clean": {
+      const items = CLEAN.items, total = items.reduce((n, it) => n + (it.size > 0 ? it.size : 0), 0);
+      if (!await confirmBox(`Delete ${items.length} item${items.length === 1 ? "" : "s"} from the PS5?`, `${total ? `This frees ${esc(size(total))}. ` : ""}It can't be undone.`, "Delete", "danger")) return;
+      cleanBusy = true; renderConsole();
+      await act("cleanup/delete", { Paths: items.map(it => it.path) });
+      CLEAN = null; cleanBusy = false; return renderConsole();
+    }
+  }
+});
+
+// ---------------- Homebrew: homebrew.page, ProsperoStore's catalog ----------------
+let BREW = null, brewErr = "", brewShow = "all";
+const BREW_SHOW = [["all", "All apps"], ["installed", "Installed"], ["updates", "Updates"], ["new", "Not installed"]];
+const SANDBOX = { stays: ["safe", "No way out of the PS5's sandbox was found"], leaves: ["leaves", "Can get full access to the console"], unclear: ["", "Sandbox use unclear"] };
+async function brewLoad(refresh) {
+  try { BREW = (await api("homebrew", { Refresh: !!refresh })).apps || []; brewErr = ""; }
+  catch (e) { brewErr = e.message; }
+  renderStore();
+}
+function brewJob(id) {
+  return S && S.build.jobs.filter(j => j.key === "hb:" + id).pop();
+}
+function renderStore() {
+  const up = (BREW || []).filter(a => a.update).length;
+  $("#nav-store").textContent = up ? up : "";
+  if (view !== "store") return;
+  const all = (BREW || []).filter(a => a.status === "available");
+  $("#storeNote").textContent = brewErr || (BREW ? `${all.length} apps from homebrew.page, checked against its signed catalog${up ? ` · ${up} update${up === 1 ? "" : "s"}` : ""}` : "Reading the catalog…");
+  $("#storeFilters").innerHTML = BREW_SHOW.map(([k, l]) => `<button data-show="${k}" aria-pressed="${brewShow === k}">${l}</button>`).join("");
+  const q = $("#storeQ").value.trim().toLowerCase();
+  const list = all.filter(a => (brewShow === "all" || (brewShow === "installed" && a.installed) || (brewShow === "updates" && a.update) || (brewShow === "new" && !a.installed))
+    && (!q || (a.name + " " + a.author + " " + a.id).toLowerCase().includes(q)));
+  $("#storeGrid").innerHTML = list.map(a => {
+    const j = brewJob(a.id), busy = j && ["queued", "sending", "deleting"].includes(j.state);
+    return `<button class="brew" data-brew="${esc(a.id)}"><span class="art">${a.icon ? `<img src="${esc(a.icon)}" alt="" loading="lazy">` : `<b>${esc(a.name)}</b>`}${
+      busy ? `<span class="tag">${j.state === "queued" ? "Waiting" : Math.floor((j.pct || 0) / 10) + "%"}</span>` : a.update ? `<span class="tag up">Update</span>` : a.installed ? `<span class="tag">Installed</span>` : ""}</span>
+      ${busy && j.pct ? `<span class="bar"><i style="width:${j.pct / 10}%"></i></span>` : ""}<span class="name">${esc(a.name)}</span><span class="by">${esc(a.author || "")}</span></button>`;
+  }).join("") || `<p class="muted" style="padding:0 4px">${BREW ? "Nothing here." : ""}</p>`;
+}
+async function brewOpen(id) {
+  const a = (BREW || []).find(x => x.id === id);
+  if (!a) return;
+  let info = {};
+  try { info = await api("homebrew/app", { ID: id }) || {}; } catch (e) { toast(e.message, true); }
+  const sb = SANDBOX[(info.safety && info.safety.sandbox) || a.sandbox];
+  const main = !a.installable ? null : a.update ? "Update" : a.installed ? "Reinstall" : "Install";
+  const btns = [{ label: "Close" }];
+  if (a.installed) btns.push({ label: "Remove", cls: "danger" });
+  if (main) btns.push({ label: main, cls: "primary" });
+  const r = await modal(`<div class="appsheet">${a.icon ? `<img src="${esc(info.icon || a.icon)}" alt="">` : ""}<div>
+      <h3>${esc(a.name)}</h3>
+      <div class="muted">${esc([a.author && "by " + a.author, "Version " + a.version, a.size ? size(a.size) : "", a.installed && a.installed !== "installed" ? "you have " + a.installed : ""].filter(Boolean).join(" · "))}</div>
+      ${sb ? `<div class="${sb[0]}">${esc(sb[1])}</div>` : ""}
+      ${a.where ? `<div class="mono muted">${esc(a.where)}</div>` : ""}</div></div>
+    ${info.description ? `<p>${esc(info.description)}</p>` : ""}
+    ${info.notes ? `<div class="notes">${esc(info.notes)}</div>` : ""}
+    <p class="muted">${!a.installable ? `This is a ${esc(a.format || "kind of")} download Loadout can't install. ` : ""}Loadout downloads it on the PC, checks it against homebrew.page's signed catalog and puts it in /data/homebrew, where ShadowMountPlus adds it to the home screen. Close the app on the PS5 before updating it.</p>`, btns);
+  if (!r || !r.i) return;
+  const label = btns[r.i].label;
+  if (label === "Remove") {
+    if (!await confirmBox(`Remove ${a.name}?`, "Its folder is deleted from the PS5. The app's own saved data is left alone.", "Remove", "danger")) return;
+    await act("homebrew/do", { ID: id, Action: "uninstall" });
+  } else {
+    await act("homebrew/do", { ID: id, Action: "install" });
+  }
+}
+$("#storeGrid").addEventListener("click", e => { const b = e.target.closest("[data-brew]"); if (b) brewOpen(b.dataset.brew); });
+$("#storeFilters").addEventListener("click", e => { const b = e.target.closest("[data-show]"); if (b) { brewShow = b.dataset.show; renderStore(); } });
+$("#storeQ").addEventListener("input", () => renderStore());
+$("#storeRefresh").onclick = () => { BREW = null; renderStore(); brewLoad(true); };
+// what's installed changes when a homebrew job finishes
+let brewDone = -1;
+setInterval(() => {
+  if (!S) return;
+  const n = S.build.jobs.filter(j => j.key && j.key.startsWith("hb:") && ["done", "failed"].includes(j.state)).length;
+  if (n !== brewDone) { const first = brewDone < 0; brewDone = n; if (!first && BREW) brewLoad(false); }
+  if (view === "store") renderStore();
+  if (view === "console") renderConsole();
+}, 1500);
+// the Homebrew tab shows how many updates wait, so read the catalog once at the start
+setTimeout(() => { if (!BREW) brewLoad(false); }, 5000);

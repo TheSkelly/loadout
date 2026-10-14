@@ -336,7 +336,7 @@ func (a *App) storeProgressLocked() map[string]storeProgress {
 			if p.State == "done" {
 				p.State = "sent"
 			}
-		case strings.HasPrefix(j.Key, "dlc:") || strings.HasPrefix(j.Key, "rom:") || strings.HasPrefix(j.Key, "save:") || strings.HasPrefix(j.Key, "rest:"):
+		case strings.HasPrefix(j.Key, "dlc:") || strings.HasPrefix(j.Key, "hb:") || strings.HasPrefix(j.Key, "rom:") || strings.HasPrefix(j.Key, "save:") || strings.HasPrefix(j.Key, "rest:"):
 			// DLC installs, ROM downloads and save backups and restores
 			switch j.State {
 			case "queued", "failed", "cancelled", "skipped":
@@ -346,7 +346,7 @@ func (a *App) storeProgressLocked() map[string]storeProgress {
 			default:
 				p = storeProgress{State: "sending", Pct: j.Pct, Note: j.Note}
 			}
-		case j.Kind == "fxupdir" && j.Key == "fx:"+path.Join(fwdRoot, ps5AppID):
+		case isPS5AppJob(j):
 			// the PS5 app's own update, which it waits on before restarting
 			switch j.State {
 			case "done":
@@ -728,6 +728,34 @@ func (a *App) storeRoutes(mux *http.ServeMux, rs *remoteServer, writeJSON func(h
 		}
 		return map[string]any{"folder": root, "systems": scanRoms(root)}
 	}))
+	// the homebrew store (homebrew.page) and cleaning up the PS5's drives
+	mux.HandleFunc("/s/homebrew", post(func(r *http.Request) (any, error) {
+		var b struct{ Refresh bool }
+		json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&b)
+		apps, err := a.homebrewList(b.Refresh)
+		return map[string]any{"apps": apps}, err
+	}))
+	mux.HandleFunc("/s/homebrew/app", post(func(r *http.Request) (any, error) {
+		var b struct{ ID string }
+		json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&b)
+		return a.homebrewDetail(strings.ToUpper(b.ID))
+	}))
+	mux.HandleFunc("/s/homebrew/do", post(func(r *http.Request) (any, error) {
+		var b struct{ ID, Action string }
+		json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&b)
+		msg, err := a.startHomebrew(b.ID, b.Action)
+		return map[string]string{"msg": msg}, err
+	}))
+	mux.HandleFunc("/s/cleanup/scan", post(func(r *http.Request) (any, error) {
+		items, kept, err := a.cleanupScan()
+		return map[string]any{"items": items, "kept": kept}, err
+	}))
+	mux.HandleFunc("/s/cleanup/delete", post(func(r *http.Request) (any, error) {
+		var b struct{ Paths []string }
+		json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&b)
+		msg, err := a.cleanupDelete(b.Paths)
+		return map[string]string{"msg": msg}, err
+	}))
 	mux.HandleFunc("/s/roms/get", post(func(r *http.Request) (any, error) {
 		var b struct{ Key string }
 		json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&b)
@@ -737,6 +765,10 @@ func (a *App) storeRoutes(mux *http.ServeMux, rs *remoteServer, writeJSON func(h
 	// the PS5 app asks for its update now, then restarts itself once it's in
 	mux.HandleFunc("/s/app/update", post(func(r *http.Request) (any, error) {
 		return map[string]string{"state": a.updatePS5App(true)}, nil
+	}))
+	// the app has closed itself: swap the staged build in
+	mux.HandleFunc("/s/app/swap", post(func(r *http.Request) (any, error) {
+		return nil, a.swapPS5AppSoon()
 	}))
 	// one job: stop, pause, resume, up or down
 	mux.HandleFunc("/s/job", post(func(r *http.Request) (any, error) {
@@ -843,7 +875,6 @@ func (a *App) installPS5App() (string, error) {
 	}
 	a.mu.Lock()
 	running := a.remote != nil
-	port := a.cfg.RemotePort
 	hasPS5 := strings.TrimSpace(a.cfg.PS5IP) != ""
 	a.mu.Unlock()
 	if !hasPS5 {
@@ -852,28 +883,7 @@ func (a *App) installPS5App() (string, error) {
 	if !running {
 		return "", errors.New("Turn on the phone remote first (it needs a PIN). The PS5 app talks to Loadout through it.")
 	}
-	if port == 0 {
-		port = defaultRemotePort
-	}
-	// first the address this PC reaches the PS5 from: a VPN or a virtual
-	// adapter (NordVPN, WSL, Hyper-V) sorts first otherwise, and the PS5
-	// can't reach those
-	a.mu.Lock()
-	ps5ip := strings.TrimSpace(a.cfg.PS5IP)
-	a.mu.Unlock()
-	ips, ts := localAddrs()
-	var urls []string
-	if route := localIPToward(ps5ip); route != "" {
-		urls = append(urls, fmt.Sprintf("http://%s:%d", route, port))
-	}
-	for _, ip := range ips {
-		if u := fmt.Sprintf("http://%s:%d", ip, port); ip != ts && (len(urls) == 0 || urls[0] != u) {
-			urls = append(urls, u)
-		}
-	}
-	if ts != "" {
-		urls = append(urls, fmt.Sprintf("http://%s:%d", ts, port))
-	}
+	urls := a.ps5AppURLs()
 	if len(urls) == 0 {
 		return "", errors.New("This PC doesn't seem to be on a network.")
 	}
@@ -906,13 +916,23 @@ func (a *App) installPS5App() (string, error) {
 		return "", err
 	}
 	os.WriteFile(filepath.Join(stage, ps5AppStampFile), []byte(ps5AppStamp()), 0644)
+	// the app reads its data folder's copy first; it gets the new pairing now
+	a.mu.Lock()
+	fhost, fport := strings.TrimSpace(a.cfg.PS5IP), a.cfg.PS5Port
+	a.mu.Unlock()
+	if f, err := ftpDial(fhost, fport); err == nil {
+		if f.mkdirAll(ps5AppData) == nil {
+			f.put(path.Join(ps5AppData, "loadout.json"), cfg)
+		}
+		f.Close()
+	}
 	dest := path.Join(fwdRoot, ps5AppID)
 	a.mu.Lock()
 	j := &BuildJob{Key: "fx:" + dest, Kind: "fxupdir", Name: "Loadout app for the PS5", Out: ps5AppID, State: "queued", Size: folderSize(stage), image: stage, Dest: dest}
 	a.addJobsLocked([]*BuildJob{j})
 	a.enqueuePS5Locked(j)
 	a.mu.Unlock()
-	return "Sending the Loadout app to the PS5. When it's done, ShadowMountPlus adds it to the home screen under Media.", nil
+	return "Sending the Loadout app to the PS5. Close Loadout on the PS5 first if it's open (Options, then Close Application). When it's done, ShadowMountPlus adds it to the home screen under Media.", nil
 }
 
 // ---------- keeping the PS5 app up to date ----------
@@ -946,62 +966,6 @@ func ps5AppStamp() string {
 // autoUpdatePS5App sends this build of the PS5 app to the PS5 when the PS5
 // has the app but an older build, and the app isn't open there right now.
 func (a *App) autoUpdatePS5App() { a.updatePS5App(false) }
-
-// updatePS5App sends this build of the PS5 app to the PS5 if it has an older
-// one. now is the PS5 app asking for it (it restarts once it's in), so it
-// doesn't wait for the app to close and it goes even with auto-update off.
-// It answers "current", "queued" (or already on its way) or "no".
-func (a *App) updatePS5App(now bool) string {
-	src, stamp := ps5AppSource(), ps5AppStamp()
-	if src == "" || stamp == "" {
-		return "no"
-	}
-	dir := path.Join(fwdRoot, ps5AppID)
-	a.mu.Lock()
-	host, port := strings.TrimSpace(a.cfg.PS5IP), a.cfg.PS5Port
-	for _, j := range a.build.Jobs {
-		if j.Key == "fx:"+dir && (j.State == "queued" || j.State == "copying") {
-			a.mu.Unlock()
-			return "queued" // already on its way
-		}
-	}
-	skip := host == "" || (!now && (!boolOr(a.cfg.PS5AppAuto, true) || !a.ps5info.Online || a.ps5AppAt == host+"|"+stamp ||
-		time.Since(a.storeHitAt) < 20*time.Second)) // open on the PS5: wait until it's closed
-	a.mu.Unlock()
-	if skip {
-		return "no"
-	}
-	f, err := ftpDial(host, port)
-	if err != nil {
-		return "no"
-	}
-	defer f.Close()
-	if n, ok := f.size(path.Join(dir, "loadout.json")); !ok || n == 0 {
-		return "no" // not installed: the first install is done from Settings, where it gets paired
-	}
-	if b, err := f.get(path.Join(dir, ps5AppStampFile), 64); err == nil && strings.TrimSpace(string(b)) == stamp {
-		a.mu.Lock()
-		a.ps5AppAt = host + "|" + stamp
-		a.mu.Unlock()
-		return "current"
-	}
-	// stage the new build, without loadout.json so the PS5 keeps its pairing
-	stage := filepath.Join(os.TempDir(), "loadout-ps5app-update", ps5AppID)
-	os.RemoveAll(filepath.Dir(stage))
-	if err := copyTree(src, stage); err != nil {
-		return "no"
-	}
-	os.Remove(filepath.Join(stage, "loadout.json"))
-	if os.WriteFile(filepath.Join(stage, ps5AppStampFile), []byte(stamp), 0644) != nil {
-		return "no"
-	}
-	a.mu.Lock()
-	j := &BuildJob{Key: "fx:" + dir, Kind: "fxupdir", Name: "Loadout app update for the PS5", Out: ps5AppID, State: "queued", Size: folderSize(stage), image: stage, Dest: dir}
-	a.addJobsLocked([]*BuildJob{j})
-	a.enqueuePS5Locked(j)
-	a.mu.Unlock()
-	return "queued"
-}
 
 // ---------- finding Loadout on the network ----------
 

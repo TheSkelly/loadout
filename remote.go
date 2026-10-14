@@ -256,7 +256,7 @@ func (a *App) remoteStateLocked() remoteState {
 				busyKeys[j.Key] = true
 			}
 		}
-		ps5app := j.Kind == "fxupdir" && j.Key == "fx:"+fwdRoot+"/"+ps5AppID
+		ps5app := isPS5AppJob(j)
 		if (j.Kind == "build" && j.Send) || j.Kind == "send" || j.Kind == "sendfolder" || j.Kind == "ps5del" || j.Kind == "ps5move" || ps5app {
 			pTotal++
 			s := ps5JobState(j)

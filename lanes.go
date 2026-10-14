@@ -196,6 +196,10 @@ func (a *App) runPS5Job(j *BuildJob) {
 			note, err = a.saveRestore(j)
 		case "savedel":
 			note, err = a.saveDelete(j)
+		case "hbinst":
+			note, err = a.runHomebrewInstall(j)
+		case "hbdel":
+			note, err = a.runHomebrewRemove(j)
 		case "pkginst":
 			note, err = a.pkgInstall(j)
 		case "fxup", "fxdown", "fxupdir", "fxzip", "fxzipflat":

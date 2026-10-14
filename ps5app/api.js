@@ -6,21 +6,26 @@
 // store API (/s/...) on the phone remote's port.
 import {Http, FileSystem} from '@ps5-react/core';
 
-const CONFIG = `${FileSystem.appDir}/loadout.json`;
+// Loadout keeps a copy in the app's data folder current (a new PC address,
+// say) without touching the app's own folder; the one Loadout installed with
+// the app is the fallback.
+const CONFIGS = [`${FileSystem.dataDir}/loadout.json`, `${FileSystem.appDir}/loadout.json`];
 
 let config = null;
 let base = '';
 
 // loadConfig reads what Loadout left for the app; null if it isn't there.
 export function loadConfig() {
-  try {
-    const c = JSON.parse(FileSystem.readFile(CONFIG));
-    if (c && Array.isArray(c.urls) && c.urls.length && typeof c.token === 'string') {
-      config = c;
-      return c;
+  for (const file of CONFIGS) {
+    try {
+      const c = JSON.parse(FileSystem.readFile(file));
+      if (c && Array.isArray(c.urls) && c.urls.length && typeof c.token === 'string') {
+        config = c;
+        return c;
+      }
+    } catch (err) {
+      // missing or broken: try the next; the setup screen explains what to do
     }
-  } catch (err) {
-    // missing or broken: the setup screen explains what to do
   }
   return null;
 }
@@ -115,9 +120,21 @@ export const api = {
   roms: () => call(`${base}/s/roms`, {maxBytes: 4 * 1024 * 1024}),
   romGet: key => call(`${base}/s/roms/get`, {body: {Key: key}}),
   appUpdate: () => call(`${base}/s/app/update`, {body: {}}),
+  // the app is about to close: Loadout swaps the new build in once it has
+  appSwap: () => call(`${base}/s/app/swap`, {body: {}}),
+  // the homebrew store (homebrew.page, ProsperoStore's catalog); the PC installs
+  homebrew: refresh => call(`${base}/s/homebrew`, {body: {Refresh: !!refresh}, maxBytes: 2 * 1024 * 1024}),
+  homebrewApp: id => call(`${base}/s/homebrew/app`, {body: {ID: id}}),
+  homebrewDo: (id, action) => call(`${base}/s/homebrew/do`, {body: {ID: id, Action: action}}),
+  // leftovers of stopped copies on the PS5's drives
+  cleanupScan: () => call(`${base}/s/cleanup/scan`, {body: {}}),
+  cleanupDelete: paths => call(`${base}/s/cleanup/delete`, {body: {Paths: paths}}),
   // one download in the queue: stop, pause, resume, up or down
   job: (id, action) => call(`${base}/s/job`, {body: {ID: id, Action: action}}),
 };
+
+// pcAddress is the address this app reached Loadout at, for the Your PS5 page
+export const pcAddress = () => base.replace(/^https?:\/\//, '');
 
 // art is a picture URL; pictures can't carry headers, so the token rides along.
 // kind is cover, hero or shot0..shot5.

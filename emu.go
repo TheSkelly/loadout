@@ -132,8 +132,8 @@ func (a *App) emuList(f *ftpConn) []EmuApp {
 			continue
 		}
 		for _, e := range ents {
-			if !e.IsDir || strings.HasPrefix(e.Name, ".") {
-				continue
+			if !e.IsDir || strings.HasPrefix(e.Name, ".") || strings.EqualFold(e.Name, ps5AppID) {
+				continue // Loadout's own PS5 app lives here too; it isn't an emulator
 			}
 			// "Some Game [PPSA01234] v01.000" is a game folder that happens to sit here, not an app
 			if id := gameID(e.Name); id != "" && !strings.EqualFold(id, e.Name) && !strings.EqualFold(id+"-app", e.Name) {

@@ -745,3 +745,97 @@ body[data-side="ps5"] .folderbar #pickFolder, body[data-side="ps5"] .folderbar #
 .lanebtns { display: flex; gap: 6px; }
 .qrow { display: flex; align-items: center; gap: 6px; padding: 6px 10px; }
 .qrow small { display: block; color: var(--muted); }
+
+/* ================= Orbit-style layout =================
+   Black and greys like Orbit Zero, Loadout's Carolina blue for focus and
+   what's selected; the sections are tabs across the top, Settings a gear. */
+:root {
+  --ink: #050608; --ink-2: #0B0D12; --surface: #14171E; --raised: #1F232D;
+  --line: #2A2F3B; --line-soft: #1A1E26;
+  --text: #F3F5F8; --muted: #9BA3B2; --faint: #636B7B;
+  --r-s: 999px; --r-m: 16px;
+}
+body { background: radial-gradient(1200px 500px at 70% -10%, #0E1A33 0%, transparent 60%), var(--ink); }
+.shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+.main { height: auto; min-height: 0; }
+.rail { flex-direction: row; align-items: center; gap: 18px; padding: 10px 28px; border-right: 0; border-bottom: 1px solid var(--line-soft); background: rgba(8, 9, 13, .85); }
+.brand { padding: 0; flex: none; }
+.brand b { font-size: 20px; }
+.tabs { flex: 1; display: flex; justify-content: flex-start; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs .navgroup { display: none; }
+/* centred when they fit; when they don't, they scroll from the first one instead of losing it */
+.tabs > button:first-of-type { margin-left: auto; }
+.tabs > button:last-of-type { margin-right: auto; }
+.navbtn { flex: none; gap: 6px; padding: 8px 15px; border-radius: 999px; font-size: 14.5px; color: var(--muted); }
+.navbtn svg { display: none; }
+.navbtn span { flex: none; }
+.navbtn em { font-size: 11px; }
+.navbtn:hover { background: var(--surface); }
+.navbtn[aria-current="page"] { background: var(--raised); color: var(--text); box-shadow: none; }
+.navspace { display: none; }
+.navbtn.gear { width: 40px; height: 40px; padding: 0; justify-content: center; border: 1px solid var(--line); }
+.navbtn.gear svg { display: block; }
+.navbtn.gear span { display: none; }
+.rail-foot { margin: 0; padding: 0; max-width: 220px; }
+.rail-foot:empty { display: none; }
+@media (max-width: 900px) { .shell { grid-template-columns: 1fr; } .navbtn span { display: inline; } .brand div { display: none; } }
+
+.folderbar { border-bottom: 0; padding: 14px 28px 4px; }
+.folder, .search { border-radius: 999px; }
+.btn { border-radius: 999px; padding: 7px 16px; }
+.btn.primary { background: var(--text); color: #07080B; border-color: var(--text); }
+.btn.primary:hover { filter: none; box-shadow: 0 0 0 2px var(--accent); }
+.btn:focus-visible, .navbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.filters button[aria-pressed="true"] { background: var(--text); color: #07080B; border-color: var(--text); }
+
+/* page headings, Orbit style */
+.pagehead { display: flex; align-items: flex-end; gap: 16px; padding: 22px 28px 8px; }
+.pagehead > div { flex: 1; }
+.kicker { display: block; font-size: 11.5px; letter-spacing: .28em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.pagehead h1 { margin: 0; font: 600 34px/1.1 var(--display); letter-spacing: -.01em; }
+.pagehead p { margin: 6px 0 0; color: var(--muted); }
+.conn { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); font-size: 13px; }
+.conn::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--coral); }
+.conn.on::before { background: var(--mint); }
+
+/* Your PS5 cards */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 18px; padding: 14px 28px 28px; }
+.card { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 20px; padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; }
+.card h3 { margin: 0; display: flex; align-items: center; font: 600 17px var(--display); }
+.card h3 small { margin-left: auto; font: 13px var(--body); color: var(--muted); }
+.card .big { font: 600 22px var(--display); }
+.card .muted { color: var(--muted); }
+.card .crow { display: flex; align-items: center; gap: 10px; }
+.card .crow .end { margin-left: auto; }
+.meter { height: 6px; border-radius: 999px; background: var(--raised); overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.choice { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); text-align: left; }
+.choice:hover { border-color: var(--muted); }
+.choice[aria-pressed="true"] { border-color: var(--accent); background: rgba(75, 156, 211, .08); }
+.choice .dot { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--text); flex: none; display: grid; place-items: center; }
+.choice[aria-pressed="true"] .dot::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--text); }
+.choice b { display: block; font-weight: 600; }
+.choice small { color: var(--muted); }
+.cleanlist { display: flex; flex-direction: column; gap: 8px; max-height: 260px; overflow: auto; }
+.cleanlist div { display: flex; flex-direction: column; padding: 8px 12px; border-radius: 12px; background: var(--raised); }
+.cleanlist small { color: var(--muted); }
+
+/* homebrew store */
+.brewgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 22px 18px; padding: 10px 28px 28px; }
+.brew { display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.brew .art { position: relative; aspect-ratio: 1; border-radius: 18px; background: var(--surface); border: 2px solid transparent; display: grid; place-items: center; overflow: hidden; transition: transform .12s, border-color .12s; }
+.brew .art img { width: 84%; height: 84%; object-fit: contain; border-radius: 12px; }
+.brew:hover .art, .brew:focus-visible .art { border-color: var(--accent); transform: scale(1.03); }
+.brew:focus-visible { outline: none; }
+.brew .tag { position: absolute; right: 8px; top: 8px; padding: 2px 9px; border-radius: 8px; font-size: 11.5px; background: rgba(0, 0, 0, .7); color: var(--sky); }
+.brew .tag.up { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.brew .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brew .by { font-size: 12.5px; color: var(--muted); margin-top: -6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.brew .bar { height: 4px; border-radius: 999px; background: var(--raised); overflow: hidden; }
+.brew .bar i { display: block; height: 100%; background: var(--accent); }
+.appsheet { display: flex; gap: 18px; }
+.appsheet img { width: 110px; height: 110px; object-fit: contain; border-radius: 18px; background: var(--raised); }
+.appsheet h3 { margin: 0 0 4px; font: 600 24px var(--display); }
+.appsheet .safe { color: var(--mint); } .appsheet .leaves { color: var(--coral); }
+.notes { white-space: pre-wrap; max-height: 220px; overflow: auto; color: var(--muted); font-size: 13px; background: var(--raised); border-radius: 12px; padding: 10px 12px; }

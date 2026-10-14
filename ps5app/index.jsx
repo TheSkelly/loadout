@@ -7,7 +7,7 @@
 // Built with PS5 React (GPL-3.0-or-later); see NOTICE in the app folder.
 import {memo, useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {AppRegistry, View, Text, Image, ScrollView, VirtualList, FocusScope, useIsFocused, useController, FileSystem, BackHandler} from '@ps5-react/core';
-import {loadConfig, connect, api, art} from './api.js';
+import {loadConfig, connect, api, art, pcAddress} from './api.js';
 import logo from './assets/logo.png';
 
 const T = 'font-inter text-text';
@@ -37,6 +37,8 @@ const when = iso => {
 };
 const byName = (a, b) => a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1;
 const sleep = ms => new Promise(done => setTimeout(done, ms));
+// the font has Latin letters only: a description in Japanese, say, would show as ????
+const readable = t => !!t && !/[\u0370-\u1fff\u3000-\uffff]/.test(t);
 
 // Each build of the app carries a stamp file (Loadout writes it). The PS5
 // resumes a suspended app instead of starting it again, so an update on disk
@@ -80,6 +82,7 @@ function stateOf(game, prog) {
   return null;
 }
 
+// what the game is doing, top right of its tile
 function Badge({game, prog}) {
   let label = '', color = C.mint;
   if (busy(prog)) { label = WORD[prog.state] || prog.state; color = C.accent; }
@@ -87,7 +90,7 @@ function Badge({game, prog}) {
   else if (game.onPs5) { label = 'Installed'; color = C.sky; }
   if (!label) return null;
   return (
-    <View className="absolute left-[10px] top-[10px] px-[10px] py-[3px] rounded-full bg-ink/90">
+    <View className="absolute right-[10px] top-[10px] px-[10px] py-[3px] rounded-lg bg-black/75">
       <Text className="font-inter text-xs" style={{color}}>{label}</Text>
     </View>
   );
@@ -103,6 +106,11 @@ function TileArt({game, prog}) {
       {cover
         ? <Image source={{uri: cover}} resizeMode="cover" className="w-[170px] h-[170px] rounded-xl bg-raised" />
         : <View className="w-[170px] h-[170px] items-center justify-center p-[14px]"><Text className={`${T} text-base text-center line-clamp-4`}>{game.name}</Text></View>}
+      {game.platform ? (
+        <View className="absolute left-[10px] top-[10px] px-[8px] py-[2px] rounded-md bg-black/75">
+          <Text className="font-inter text-xs text-text">{game.platform}</Text>
+        </View>
+      ) : null}
       <Badge game={game} prog={prog} />
       {busy(prog) && prog.pct > 0 ? <View className="absolute left-[10px] bottom-[10px]"><Bar pct={prog.pct / 10} width={150} /></View> : null}
     </View>
@@ -111,7 +119,7 @@ function TileArt({game, prog}) {
 
 function TileName({name}) {
   const focused = useIsFocused();
-  return <Text focused={focused} className="font-inter text-sm text-muted focused:text-text truncate w-[176px]">{name}</Text>;
+  return <Text focused={focused} className="font-inter text-sm text-muted focused:text-text focused:font-bold truncate w-[176px]">{name}</Text>;
 }
 
 // `end` is set on a rail's last tile: Right stops there instead of dropping to the next rail
@@ -124,7 +132,7 @@ const Tile = memo(function Tile({game, prog, onOpen, onSpot, end}) {
   );
 });
 
-function Heading({title, note, pad = 48}) {
+function Heading({title, note, pad = 64}) {
   return (
     <View className="flex-row items-end gap-[12px]" style={{paddingLeft: pad, paddingRight: pad}}>
       <Text className={`${T} text-lg font-bold`}>{title}</Text>
@@ -138,12 +146,12 @@ const Shelf = memo(function Shelf({id, title, note, games, progress, onOpen, onS
   if (!games.length) return null;
   const last = games.length - 1;
   return (
-    <View scrollAnchor className="gap-[4px] pt-[16px]">
+    <View scrollAnchor className="gap-[4px] pt-[8px] pb-[40px]">
       <Heading title={title} note={note} />
       <ScrollView horizontal className="w-screen h-[235px] flex-row items-start gap-[22px] py-[12px]">
-        <View className="w-[26px] h-[1px]" />
+        <View className="w-[42px] h-[1px]" />
         {games.map((g, i) => <Tile key={g.key} game={g} prog={progress[g.key]} onOpen={onOpen} onSpot={onSpot} end={i === last ? `end:${id}` : undefined} />)}
-        <View className="w-[26px] h-[1px]" />
+        <View className="w-[42px] h-[1px]" />
       </ScrollView>
     </View>
   );
@@ -178,33 +186,78 @@ function Logo({big}) {
   );
 }
 
+// Orbit-style: a white pill for the main action, grey for the rest, a
+// Carolina blue ring on whatever has focus
 function Button({label, onPress, primary, disabled, small}) {
   if (disabled) {
     return (
-      <View focusable className={small ? 'px-[20px] py-[7px] rounded-lg bg-raised border-[3px] border-transparent focused:border-text'
-        : 'px-[34px] py-[13px] rounded-xl bg-raised border-[3px] border-transparent focused:border-text'}>
-        <Text className={small ? 'font-inter text-sm text-muted' : 'font-inter text-base text-muted'}>{label}</Text>
+      <View focusable className={small ? 'px-[20px] py-[7px] rounded-full bg-raised border-[3px] border-transparent focused:border-accent'
+        : 'px-[34px] py-[12px] rounded-full bg-raised border-[3px] border-transparent focused:border-accent'}>
+        <Text className={small ? 'font-inter text-sm text-faint' : 'font-inter text-base text-faint'}>{label}</Text>
       </View>
     );
   }
   if (small) {
     return primary ? (
-      <View onPress={onPress} className="px-[20px] py-[7px] rounded-lg bg-accent border-[3px] border-transparent focused:border-text">
+      <View onPress={onPress} className="px-[20px] py-[7px] rounded-full bg-text border-[3px] border-transparent focused:border-accent">
         <Text className="font-inter text-sm font-bold text-ink">{label}</Text>
       </View>
     ) : (
-      <View onPress={onPress} className="px-[20px] py-[7px] rounded-lg bg-raised border-[3px] border-transparent focused:border-accent">
+      <View onPress={onPress} className="px-[20px] py-[7px] rounded-full bg-raised border-[3px] border-transparent focused:border-accent">
         <Text className="font-inter text-sm text-text">{label}</Text>
       </View>
     );
   }
   return primary ? (
-    <View onPress={onPress} className="px-[40px] py-[13px] rounded-xl bg-accent border-[3px] border-transparent transition focused:border-text focused:scale-105">
+    <View onPress={onPress} className="px-[44px] py-[12px] rounded-full bg-text border-[3px] border-transparent transition focused:border-accent focused:scale-105">
       <Text className="font-inter text-base font-bold text-ink">{label}</Text>
     </View>
   ) : (
-    <View onPress={onPress} className="px-[34px] py-[13px] rounded-xl bg-raised/90 border-[3px] border-transparent transition focused:border-accent focused:scale-105">
+    <View onPress={onPress} className="px-[34px] py-[12px] rounded-full bg-raised/90 border-[3px] border-transparent transition focused:border-accent focused:scale-105">
       <Text className="font-inter text-base text-text">{label}</Text>
+    </View>
+  );
+}
+
+// a round button, like Orbit's heart
+function RoundButton({label, on, onPress}) {
+  return on ? (
+    <View onPress={onPress} className="w-[52px] h-[52px] items-center justify-center rounded-full bg-accent border-[3px] border-transparent transition focused:border-text focused:scale-105">
+      <Text className="font-inter text-lg font-bold text-ink">{label}</Text>
+    </View>
+  ) : (
+    <View onPress={onPress} className="w-[52px] h-[52px] items-center justify-center rounded-full bg-black/40 border-2 border-muted transition focused:border-accent focused:scale-105">
+      <Text className="font-inter text-lg text-text">{label}</Text>
+    </View>
+  );
+}
+
+// what the controller does here, bottom right like the PS5's own menus
+function Hint({btn, label}) {
+  return (
+    <View className="flex-row items-center gap-[8px]">
+      {btn === 'cross' || btn === 'circle' ? (
+        <View className="w-[24px] h-[24px] items-center justify-center rounded-full border-2 border-text">
+          {btn === 'cross' ? <Text className="font-inter text-sm text-text">×</Text> : <View className="w-[10px] h-[10px] rounded-full border-2 border-text" />}
+        </View>
+      ) : (
+        <View className="flex-row gap-[4px]">
+          {btn.split(' ').map(b => (
+            <View key={b} className="px-[6px] h-[24px] items-center justify-center rounded-md border-2 border-text">
+              <Text className="font-inter text-xs text-text">{b}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+      <Text className="font-inter text-sm text-text">{label}</Text>
+    </View>
+  );
+}
+
+function Hints({items}) {
+  return (
+    <View className="absolute right-[48px] bottom-[20px] flex-row items-center gap-[26px] px-[16px] py-[8px] rounded-full bg-black/60">
+      {items.map(it => <Hint key={it.label} btn={it.btn} label={it.label} />)}
     </View>
   );
 }
@@ -251,7 +304,8 @@ function Message({title, body, action, onAction}) {
   );
 }
 
-// the top of the home screen: the focused game's art and what it is
+// behind Discover: the focused game's art, full screen, darkened toward the
+// text on the left and the rails at the bottom
 function Backdrop({hero}) {
   const [shown, setShown] = useState(hero);
   useEffect(() => {
@@ -260,66 +314,73 @@ function Backdrop({hero}) {
   }, [hero]);
   const uri = art(shown, 'hero');
   return (
-    <View className="absolute left-0 top-0 w-screen h-[330px] overflow-hidden">
+    <View className="absolute left-0 top-0 w-screen h-screen overflow-hidden">
       <View className="absolute inset-0 bg-gradient-to-br from-ink2 via-ink to-black" />
-      {uri ? <Image key={uri} source={{uri}} resizeMode="cover" className="absolute right-0 top-0 w-[900px] h-[330px]" /> : null}
-      <View className="absolute left-0 top-0 w-[900px] h-[330px] bg-gradient-to-r from-ink via-ink/85 to-transparent" />
-      <View className="absolute left-0 bottom-0 w-screen h-[120px] bg-gradient-to-t from-ink to-transparent" />
+      {uri ? <Image key={uri} source={{uri}} resizeMode="cover" className="absolute right-0 top-0 w-[1100px] h-[620px]" /> : null}
+      <View className="absolute left-0 top-0 w-[860px] h-screen bg-gradient-to-r from-ink via-ink/80 to-transparent" />
+      <View className="absolute left-0 top-0 w-screen h-[110px] bg-gradient-to-b from-ink/80 to-transparent" />
+      <View className="absolute left-0 bottom-0 w-screen h-[420px] bg-gradient-to-t from-ink via-ink/90 to-transparent" />
     </View>
   );
 }
 
-function Spotlight({game, prog}) {
-  if (!game) return null;
+// the big title over the art: what the game is, View game and a favourite star
+function Hero({game, prog, onOpen}) {
+  const favs = useFavs();
+  if (!game) return <View className="h-[300px]" />;
   const st = stateOf(game, prog);
   const meta = [game.platform, size(game.size), (game.genres || []).slice(0, 2).join(', '), game.rating ? `★ ${game.rating.toFixed(1)}` : '',
     game.dlc && game.dlc.length ? `${game.dlc.length} DLC${dlcDone(game) ? ` (${dlcDone(game) === game.dlc.length ? 'all' : dlcDone(game)} installed)` : ''}` : ''].filter(Boolean).join('   ·   ');
+  const fav = favs.has(game.key);
   return (
-    <View className="w-[680px] px-[48px] pt-[12px] gap-[8px]">
-      <Text className={`${T} text-[38px] leading-[46px] font-bold line-clamp-2`}>{game.name}</Text>
+    <View className="h-[300px] w-[640px] px-[64px] pt-[18px] gap-[10px]">
+      <Text className="font-inter text-xs tracking-[4px]" style={{color: st ? st.color : C.muted}}>{(st ? st.label : 'Discover').toUpperCase()}</Text>
+      <Text className={`${T} text-[44px] leading-[50px] font-bold line-clamp-2`}>{game.name}</Text>
       <Text className="font-inter text-sm text-muted line-clamp-1">{meta}</Text>
-      {st ? <Text className="font-inter text-sm" style={{color: st.color}}>{st.label}</Text> : null}
-      {game.desc ? <Text className="font-inter text-sm text-text/80 line-clamp-2 pt-[2px]">{game.desc}</Text> : null}
-    </View>
-  );
-}
-
-function Tab({label, on, onPress}) {
-  return on ? (
-    <View onPress={onPress} className="px-[18px] py-[6px] rounded-full bg-accent border-2 border-transparent focused:border-text">
-      <Text className="font-inter text-sm font-bold text-ink">{label}</Text>
-    </View>
-  ) : (
-    <View onPress={onPress} className="px-[18px] py-[6px] rounded-full bg-surface/80 border-2 border-transparent focused:border-accent">
-      <Text className="font-inter text-sm text-text">{label}</Text>
-    </View>
-  );
-}
-
-function TopBar({tab, setTab, status, update}) {
-  return (
-    <View className="flex-row items-center px-[48px] pt-[22px] gap-[16px]">
-      <Logo />
+      {readable(game.desc) ? <Text className="font-inter text-sm text-text/80 line-clamp-2">{game.desc}</Text> : <View className="h-[42px]" />}
       <FocusScope>
-        <View className="flex-row gap-[10px] pl-[18px]">
-          <Tab label="Games" on={tab === 'games'} onPress={() => setTab('games')} />
-          <Tab label="Emulators" on={tab === 'emu'} onPress={() => setTab('emu')} />
-          <Tab label={`Downloads${status && status.queue && status.queue.length ? ` · ${status.queue.length}` : ''}`} on={tab === 'dl'} onPress={() => setTab('dl')} />
+        <View className="flex-row items-center gap-[16px] pt-[6px]">
+          <Button primary label="View game" onPress={() => onOpen(game.key)} />
+          <RoundButton label="★" on={fav} onPress={() => toggleFav(game.key)} />
         </View>
       </FocusScope>
-      <Text className="font-inter text-xs text-faint">L1 / R1</Text>
+    </View>
+  );
+}
+
+// Orbit's tabs: plain words, the open one on a grey pill
+function Tab({label, on, onPress}) {
+  return on ? (
+    <View onPress={onPress} className="px-[18px] py-[7px] rounded-full bg-raised border-[3px] border-transparent focused:border-accent">
+      <Text className="font-inter text-base text-text">{label}</Text>
+    </View>
+  ) : (
+    <View onPress={onPress} className="px-[18px] py-[7px] rounded-full border-[3px] border-transparent focused:border-accent">
+      <Text className="font-inter text-base text-muted">{label}</Text>
+    </View>
+  );
+}
+
+const TAB_NAMES = {games: 'Discover', browse: 'Browse', library: 'Library', brew: 'Homebrew', emu: 'Emulators', dl: 'Downloads', console: 'Your PS5'};
+
+function TopBar({tab, setTab, status, update}) {
+  const n = status && status.queue ? status.queue.length : 0;
+  return (
+    <View className="flex-row items-center px-[48px] pt-[18px] gap-[16px]">
+      <Logo />
+      <View className="flex-1" />
+      <FocusScope>
+        <View className="flex-row gap-[4px]">
+          {TABS.map(t => <Tab key={t} label={t === 'dl' && n ? `Downloads · ${n}` : TAB_NAMES[t]} on={tab === t} onPress={() => setTab(t)} />)}
+        </View>
+      </FocusScope>
       <View className="flex-1" />
       {update ? (
         <View className="flex-row items-center gap-[8px] px-[14px] py-[6px] rounded-full bg-accent">
           <Text className="font-inter text-sm font-bold text-ink">Update ready</Text>
-          <Text className="font-inter text-xs text-ink">Press Triangle</Text>
+          <Text className="font-inter text-xs text-ink">Triangle</Text>
         </View>
-      ) : null}
-      <Activity status={status} />
-      <View className="items-end">
-        {status && status.pc ? <Text className="font-inter text-sm text-muted">{status.pc}</Text> : null}
-        {LAUNCHED ? <Text className="font-inter text-xs text-faint">{`Build ${LAUNCHED.slice(0, 7)}`}</Text> : null}
-      </View>
+      ) : <Activity status={status} />}
     </View>
   );
 }
@@ -397,7 +458,7 @@ function Pill({label, on, onPress}) {
 function FindBar({find, setFind, onSearch}) {
   const next = k => setFind(f => Object.assign({}, f, {[k]: (f[k] + 1) % FILTERS[k].length}));
   return (
-    <View scrollAnchor className="flex-row flex-wrap items-center gap-[10px] px-[48px] pt-[14px]">
+    <View scrollAnchor className="flex-row flex-wrap items-center gap-[10px] px-[64px] pt-[14px]">
       <Pill label={find.text ? `Search: ${find.text}` : 'Search'} on={!!find.text} onPress={onSearch} />
       {Object.keys(FILTERS).map(k => <Pill key={k} label={FILTERS[k][find[k]].label} on={find[k] > 0} onPress={() => next(k)} />)}
       <Pill label={find.favs ? '★ Favourites' : 'Favourites'} on={find.favs} onPress={() => setFind(f => Object.assign({}, f, {favs: !f.favs}))} />
@@ -460,69 +521,208 @@ function Keyboard({text, count, onText, onClose}) {
 // the search and filters outlast leaving the tab or opening a game
 let lastFind = NO_FIND;
 
+// Discover: the focused game big over its art, rails of games below
 function Games({games, progress, onOpen}) {
   const [spot, setSpot] = useState(null);
-  const [find, setFindState] = useState(lastFind);
-  const [typing, setTyping] = useState(false);
-  const setFind = useCallback(f => setFindState(old => (lastFind = typeof f === 'function' ? f(old) : f)), []);
   const favs = useFavs();
   const shelves = useMemo(() => {
     const moving = games.filter(g => busy(progress[g.key]));
     const recent = games.filter(g => seen(g.firstSeen)).sort((a, b) => seen(b.firstSeen) - seen(a.firstSeen) || byName(a, b)).slice(0, 15);
     const notOn = games.filter(g => !g.onPs5 && g.canGet);
-    const onPs5 = games.filter(g => g.onPs5);
     const dlc = games.filter(g => g.dlc && g.dlc.some(d => d.pkg && !d.installed));
+    const rated = games.filter(g => g.rating >= 4).sort((a, b) => b.rating - a.rating || byName(a, b)).slice(0, 15);
     // the genres with the most games get rails of their own
     const count = {};
     for (const g of games) for (const x of g.genres || []) count[x] = (count[x] || 0) + 1;
     const genres = Object.keys(count).filter(x => count[x] >= 4).sort((a, b) => count[b] - count[a]).slice(0, 3)
       .map(x => ({name: x, games: games.filter(g => (g.genres || []).includes(x))}));
     const fav = games.filter(g => favs.has(g.key));
-    return {moving, recent, notOn, onPs5, dlc, genres, fav};
+    return {moving, recent, notOn, dlc, rated, genres, fav};
   }, [games, progress, favs]);
-  const found = useMemo(() => finding(find) ? findGames(games, find, favs) : null, [games, find, favs]);
-  const all = useMemo(() => find.sort ? [...games].sort(SORTS[find.sort].by) : games, [games, find.sort]);
   const onSpot = useCallback(key => { setSpot(key); tellSpot(key); }, []);
-  const renderItem = useCallback(({item}) => <Tile game={item} prog={progress[item.key]} onOpen={onOpen} onSpot={onSpot} />, [progress, onOpen, onSpot]);
-  const game = games.find(g => g.key === spot) || (found && found[0]) || shelves.recent[0] || games[0];
-  const grid = list => (
-    <View className="px-[48px] pt-[6px]">
-      <VirtualList data={list} keyExtractor={g => g.key} renderItem={renderItem}
-        numColumns={6} itemHeight={TILE_H} rowGap={26} columnGap={25} />
-    </View>
-  );
+  const game = games.find(g => g.key === spot) || shelves.recent[0] || games[0];
+  const rail = (id, title, list, note) => <Shelf id={id} title={title} note={note} games={list} progress={progress} onOpen={onOpen} onSpot={onSpot} />;
   return (
     <View className="flex-1">
-      <View className="h-[258px]">
-        <Spotlight game={game} prog={game && progress[game.key]} />
-      </View>
+      <Hero game={game} prog={game && progress[game.key]} onOpen={onOpen} />
+      <View className="flex-1 overflow-hidden">
       <FocusScope autoFocus>
-        <ScrollView className="flex-1 bg-ink">
-          <FindBar find={find} setFind={setFind} onSearch={() => setTyping(true)} />
-          {found ? (
-            <View scrollAnchor className="gap-[14px] pt-[16px] pb-[48px]">
-              <Heading title="Results" note={`${found.length} game${found.length === 1 ? '' : 's'}, ${SORTS[find.sort].label}`} />
-              {found.length ? grid(found) : <Text className="font-inter text-base text-muted px-[48px]">Nothing matches. Change the search or press Clear.</Text>}
-            </View>
-          ) : null}
-          {found ? null : <View>
-          <Shelf id="moving" title="Downloading" games={shelves.moving} progress={progress} onOpen={onOpen} onSpot={onSpot} />
-          <Shelf id="fav" title="Favourites" games={shelves.fav} progress={progress} onOpen={onOpen} onSpot={onSpot} />
-          <Shelf id="recent" title="New in your library" games={shelves.recent} progress={progress} onOpen={onOpen} onSpot={onSpot} />
-          <Shelf id="noton" title="Ready for your PS5" note={`${shelves.notOn.length} games`} games={shelves.notOn} progress={progress} onOpen={onOpen} onSpot={onSpot} />
-          <Shelf id="dlc" title="DLC to install" note="open a game to install its DLC" games={shelves.dlc} progress={progress} onOpen={onOpen} onSpot={onSpot} />
+        <ScrollView className="flex-1">
+          {rail('moving', 'Downloading', shelves.moving)}
+          {rail('recent', 'New in your library', shelves.recent)}
+          {rail('fav', 'Favourites', shelves.fav)}
+          {rail('noton', 'Ready for your PS5', shelves.notOn, `${shelves.notOn.length} games`)}
+          {rail('rated', 'Top rated', shelves.rated)}
+          {rail('dlc', 'DLC to install', shelves.dlc, 'open a game to install its DLC')}
           {shelves.genres.map(x => <Shelf key={x.name} id={`g:${x.name}`} title={x.name} games={x.games} progress={progress} onOpen={onOpen} onSpot={onSpot} />)}
-          <Shelf id="onps5" title="On your PS5" games={shelves.onPs5} progress={progress} onOpen={onOpen} onSpot={onSpot} />
-          <View scrollAnchor className="gap-[14px] pt-[16px] pb-[48px]">
-            <Heading title="All games" note={`${games.length}, ${SORTS[find.sort].label}`} />
-            {grid(all)}
-          </View>
-          </View>}
-          {!games.length ? <Text className="font-inter text-base text-muted px-[48px] pt-[30px]">No games in Loadout yet. Pick your games folder in Loadout on the PC.</Text> : null}
+          <View className="h-[70px]" />
+          {!games.length ? <Text className="font-inter text-base text-muted px-[64px] pt-[30px]">No games in Loadout yet. Pick your games folder in Loadout on the PC.</Text> : null}
         </ScrollView>
       </FocusScope>
-      {typing ? <Keyboard text={find.text} count={found ? found.length : games.length}
+      </View>
+    </View>
+  );
+}
+
+// a page with a big title, like Orbit's Browse and Library
+function PageTitle({kicker, title, note}) {
+  return (
+    <View className="px-[64px] pt-[22px] gap-[6px]">
+      {kicker ? <Text className="font-inter text-xs text-muted tracking-[4px]">{kicker}</Text> : null}
+      <Text className={`${T} text-[40px] leading-[48px] font-bold`}>{title}</Text>
+      {note ? <Text className="font-inter text-sm text-muted">{note}</Text> : null}
+    </View>
+  );
+}
+
+// a grid of tiles in a page that scrolls
+function GameGrid({list, progress, onOpen}) {
+  const renderItem = useCallback(({item}) => <Tile game={item} prog={progress[item.key]} onOpen={onOpen} onSpot={tellSpot} />, [progress, onOpen]);
+  return (
+    <View className="px-[64px] pt-[10px]">
+      <VirtualList data={list} keyExtractor={g => g.key} renderItem={renderItem}
+        numColumns={6} itemHeight={TILE_H} rowGap={26} columnGap={18} />
+    </View>
+  );
+}
+
+// Browse: every game, searched, filtered and sorted
+function Browse({games, progress, onOpen}) {
+  const [find, setFindState] = useState(lastFind);
+  const [typing, setTyping] = useState(false);
+  const setFind = useCallback(f => setFindState(old => (lastFind = typeof f === 'function' ? f(old) : f)), []);
+  const favs = useFavs();
+  const list = useMemo(() => findGames(games, find, favs), [games, find, favs]);
+  return (
+    <View className="flex-1">
+      <PageTitle kicker="BROWSE" title={find.text ? `Results for ${find.text}` : 'All games'}
+        note={`${list.length} of ${games.length} games · ${SORTS[find.sort].label}`} />
+      <FocusScope autoFocus>
+        <ScrollView className="flex-1">
+          <FindBar find={find} setFind={setFind} onSearch={() => setTyping(true)} />
+          <View scrollAnchor className="pt-[14px] pb-[70px]">
+            {list.length ? <GameGrid list={list} progress={progress} onOpen={onOpen} />
+              : <Text className="font-inter text-base text-muted px-[64px] pt-[10px]">Nothing matches. Change the search or press Clear.</Text>}
+          </View>
+        </ScrollView>
+      </FocusScope>
+      {typing ? <Keyboard text={find.text} count={list.length}
         onText={text => setFind(f => Object.assign({}, f, {text}))} onClose={() => setTyping(false)} /> : null}
+    </View>
+  );
+}
+
+// Library: what's on this PS5
+function Library({games, progress, onOpen}) {
+  const on = useMemo(() => games.filter(g => g.onPs5), [games]);
+  const drives = {};
+  for (const g of on) {
+    const d = (g.onPs5 || '').split(' ')[0] || 'PS5';
+    drives[d] = (drives[d] || 0) + 1;
+  }
+  return (
+    <View className="flex-1">
+      <PageTitle kicker="LIBRARY" title="On your PS5"
+        note={on.length ? `${on.length} games, ${size(on.reduce((n, g) => n + (g.size || 0), 0))}` : 'Games you download to this PS5 show here.'} />
+      <FocusScope autoFocus>
+        <ScrollView className="flex-1">
+          <View scrollAnchor className="pt-[16px] pb-[70px]">
+            {on.length ? <GameGrid list={on} progress={progress} onOpen={onOpen} />
+              : <View focusable className="mx-[64px] w-[1px] h-[1px]" />}
+          </View>
+        </ScrollView>
+      </FocusScope>
+    </View>
+  );
+}
+
+// Your PS5: the connection, where downloads go, the drives and what's moving
+function Card({title, right, children}) {
+  return (
+    <View className="w-[560px] p-[22px] gap-[14px] rounded-3xl bg-surface/90 border border-line">
+      <View className="flex-row items-center">
+        <Text className={`${T} text-lg font-bold`}>{title}</Text>
+        <View className="flex-1" />
+        {right ? <Text className="font-inter text-sm text-muted">{right}</Text> : null}
+      </View>
+      {children}
+    </View>
+  );
+}
+
+function Console({status, drive, setDrive, setTab, onChanged}) {
+  const [asking, setAsking] = useState(null);
+  const drives = (status && status.drives) || [];
+  const queue = (status && status.queue) || [];
+  const now = queue.filter(q => q.state !== 'queued' && q.state !== 'paused');
+  const lane = status && status.ps5;
+  return (
+    <View className="flex-1">
+      <View className="flex-row items-end pr-[64px]">
+        <PageTitle kicker="CONSOLE" title="Your PS5" />
+        <View className="flex-1" />
+        <View className="flex-row items-center gap-[8px] px-[16px] py-[7px] rounded-full bg-surface border border-line">
+          <View className="w-[9px] h-[9px] rounded-full" style={{backgroundColor: status ? C.mint : C.coral}} />
+          <Text className="font-inter text-sm text-text">{status ? 'Connected' : 'Not connected'}</Text>
+        </View>
+      </View>
+      <FocusScope autoFocus>
+        <ScrollView className="flex-1">
+          <View className="flex-row flex-wrap gap-[20px] px-[64px] pt-[20px] pb-[70px]">
+            <Card title="Connection" right={status ? `Loadout ${status.version}` : ''}>
+              <Text className={`${T} text-xl font-bold`}>{(status && status.pc) || 'Your PC'}</Text>
+              <Text className="font-inter text-sm text-muted">{pcAddress()}</Text>
+              <Text className="font-inter text-sm text-muted">{status && status.ps5Online ? 'Your PC can reach this PS5. Ready for downloads.' : 'Your PC can\'t reach this PS5 right now. Check its FTP server.'}</Text>
+              {LAUNCHED ? <Text className="font-inter text-xs text-faint">{`App build ${LAUNCHED.slice(0, 7)}`}</Text> : null}
+              <Button small label="Refresh" onPress={onChanged} />
+            </Card>
+            <Card title="Downloads go to" right="for new downloads">
+              {drives.length ? drives.map(d => (
+                <View key={d.root} onPress={() => setDrive(d.root)} selected={d.root === drive}
+                  className="flex-row items-center gap-[12px] px-[16px] py-[10px] rounded-2xl bg-raised/70 border-[3px] border-transparent selected:border-royal focused:border-accent">
+                  <View className="w-[18px] h-[18px] rounded-full border-2 border-text items-center justify-center">
+                    {d.root === drive ? <View className="w-[8px] h-[8px] rounded-full bg-text" /> : null}
+                  </View>
+                  <View className="flex-1">
+                    <Text className={`${T} text-base`}>{d.label || d.short}</Text>
+                    <Text className="font-inter text-xs text-muted">{d.free >= 0 ? `${size(d.free)} free` : 'free space unknown'}</Text>
+                  </View>
+                </View>
+              )) : <Text className="font-inter text-sm text-muted">Loadout hasn't read this PS5's drives yet.</Text>}
+            </Card>
+            <Card title="Storage" right={drives.length ? `${drives.length} drive${drives.length === 1 ? '' : 's'}` : ''}>
+              {drives.map(d => (
+                <View key={d.root} focusable className="gap-[8px] py-[4px] rounded-xl border-[3px] border-transparent focused:border-accent px-[6px]">
+                  <View className="flex-row">
+                    <Text className={`${T} text-base`}>{d.label || d.short}</Text>
+                    <View className="flex-1" />
+                    <Text className="font-inter text-sm text-text">{d.free >= 0 ? `${size(d.free)} free` : ''}</Text>
+                  </View>
+                  <Bar pct={d.total > 0 && d.free >= 0 ? (d.total - d.free) * 100 / d.total : 0} width={490} color={C.accent} />
+                  <Text className="font-inter text-xs text-muted">{d.total > 0 ? `${size(d.total)} total` : ''}</Text>
+                </View>
+              ))}
+            </Card>
+            <Card title="Active transfers" right={lane && lane.speed ? speed(lane.speed) : ''}>
+              {now.length ? now.map(q => (
+                <View key={q.id} className="gap-[8px]">
+                  <View className="flex-row">
+                    <Text className={`${T} text-base truncate w-[340px]`}>{q.name}</Text>
+                    <View className="flex-1" />
+                    <Text className="font-inter text-sm text-muted">{QSTATE[q.state] || q.state}</Text>
+                  </View>
+                  <Bar pct={q.pct / 10} width={510} color={C.sky} />
+                  <Text className="font-inter text-xs text-muted">{[`${Math.floor(q.pct / 10)}%`, lane && lane.eta ? `${dur(lane.eta)} left` : '', q.note].filter(Boolean).join(' · ')}</Text>
+                </View>
+              )) : <Text className="font-inter text-sm text-muted">Nothing is downloading.</Text>}
+              {queue.length > now.length ? <Text className="font-inter text-sm text-muted">{`${queue.length - now.length} waiting or paused`}</Text> : null}
+              <Button small label="Open downloads" onPress={() => setTab('dl')} />
+            </Card>
+            <Cleanup onChanged={onChanged} ask={setAsking} />
+          </View>
+        </ScrollView>
+      </FocusScope>
+      {asking ? <Confirm title={asking.title} body={asking.body} yes={asking.yes} onYes={asking.onYes} onClose={() => setAsking(null)} /> : null}
     </View>
   );
 }
@@ -584,7 +784,8 @@ function Emulators({progress, onPick}) {
   else if (!systems.length) empty = `No games in ${data.folder} yet. Put each system's games in a folder of its own inside it.`;
   return (
     <View className="flex-1">
-      <View className="h-[258px] px-[48px] pt-[12px] gap-[8px] w-[760px]">
+      <View className="h-[258px] px-[64px] pt-[22px] gap-[8px] w-[800px]">
+        <Text className="font-inter text-xs text-muted tracking-[4px]">EMULATORS</Text>
         {rom ? <Text className={`${T} text-[38px] leading-[46px] font-bold line-clamp-2`}>{rom.name}</Text> : null}
         {rom ? <Text className="font-inter text-sm text-muted">{[rom.system, size(rom.size), rom.file].filter(Boolean).join('   ·   ')}</Text> : null}
         {rom ? <Text className="font-inter text-sm text-accent">{busy(prog) ? `${WORD[prog.state] || 'Downloading'}${prog.pct ? ` · ${Math.floor(prog.pct / 10)}%` : ''}` : prog && prog.state === 'sent' ? `Downloaded to ${rom.emu}` : `Downloads to ${rom.emu} on this PS5`}</Text> : null}
@@ -593,23 +794,23 @@ function Emulators({progress, onPick}) {
       </View>
       {empty ? (
         <FocusScope autoFocus>
-          <View className="px-[48px] pt-[10px] w-[900px] gap-[16px]">
+          <View className="px-[64px] pt-[10px] w-[900px] gap-[16px]">
             <Text className="font-inter text-base text-muted">{empty}</Text>
             <View focusable className="w-[1px] h-[1px]" />
           </View>
         </FocusScope>
       ) : (
         <FocusScope autoFocus>
-          <ScrollView className="flex-1 bg-ink">
+          <ScrollView className="flex-1">
             {systems.map(s => {
               const last = s.games.length - 1;
               return (
                 <View key={s.name} scrollAnchor className="gap-[4px] pt-[16px]">
                   <Heading title={s.name} note={`${s.games.length} · to ${s.emu}`} />
                   <ScrollView horizontal className="w-screen h-[235px] flex-row items-start gap-[22px] py-[12px]">
-                    <View className="w-[26px] h-[1px]" />
+                    <View className="w-[42px] h-[1px]" />
                     {s.games.map((r, i) => <RomTile key={r.key} rom={r} prog={progress[`rom:${r.key}`]} onPick={onPick} onSpot={onSpot} end={i === last ? `end:rom:${s.name}` : undefined} />)}
-                    <View className="w-[26px] h-[1px]" />
+                    <View className="w-[42px] h-[1px]" />
                   </ScrollView>
                 </View>
               );
@@ -619,6 +820,202 @@ function Emulators({progress, onPick}) {
         </FocusScope>
       )}
     </View>
+  );
+}
+
+// ---------- homebrew: the homebrew.page catalog, ProsperoStore's ----------
+
+const HB_SHOW = [{label: 'All apps'}, {label: 'Installed', test: a => !!a.installed}, {label: 'Updates', test: a => a.update},
+  {label: 'Not installed', test: a => !a.installed && a.installable}];
+const SANDBOX = {stays: 'Stays in the PS5 sandbox', leaves: 'Can get full access to the console', unclear: 'Sandbox use unclear'};
+
+function HbArt({app, prog}) {
+  const focused = useIsFocused();
+  return (
+    <View focused={focused} className="w-[176px] h-[176px] rounded-2xl bg-raised border-[3px] border-transparent overflow-hidden
+      transition focused:border-accent focused:scale-105 items-center justify-center">
+      {app.icon
+        ? <Image source={{uri: app.icon}} resizeMode="contain" className="w-[150px] h-[150px] rounded-xl" />
+        : <Text className={`${T} text-base text-center px-[12px] line-clamp-3`}>{app.name}</Text>}
+      {busy(prog) ? (
+        <View className="absolute right-[10px] top-[10px] px-[10px] py-[3px] rounded-lg bg-black/75">
+          <Text className="font-inter text-xs text-accent">{prog.pct ? `${Math.floor(prog.pct / 10)}%` : 'Working'}</Text>
+        </View>
+      ) : app.update ? (
+        <View className="absolute right-[10px] top-[10px] px-[10px] py-[3px] rounded-lg bg-accent">
+          <Text className="font-inter text-xs font-bold text-ink">Update</Text>
+        </View>
+      ) : app.installed ? (
+        <View className="absolute right-[10px] top-[10px] px-[10px] py-[3px] rounded-lg bg-black/75">
+          <Text className="font-inter text-xs text-sky">Installed</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+const HbTile = memo(function HbTile({app, prog, onPick}) {
+  return (
+    <View onPress={() => onPick(app)} className="w-[176px] gap-[8px]">
+      <HbArt app={app} prog={prog} />
+      <TileName name={app.name} />
+    </View>
+  );
+});
+
+// one app: what it is and what can be done with it
+function HbPage({app, prog, onClose, onDone}) {
+  const [info, setInfo] = useState(null);
+  const [note, setNote] = useState(null);
+  const [asking, setAsking] = useState(null);
+  useEffect(() => {
+    let stop = false;
+    api.homebrewApp(app.id).then(r => { if (!stop) setInfo(r.data || {}); }).catch(err => { if (!stop) setNote({text: err.message, bad: true}); });
+    return () => { stop = true; };
+  }, [app.id]);
+  const act = async action => {
+    try {
+      const r = await api.homebrewDo(app.id, action);
+      setNote({text: (r.data && r.data.msg) || 'Started.'});
+      onDone();
+    } catch (err) {
+      setNote({text: err.message, bad: true});
+    }
+  };
+  const b = busy(prog);
+  const main = !app.installable ? null : app.update ? 'Update' : app.installed ? 'Reinstall' : 'Install';
+  const meta = [app.author && `by ${app.author}`, `Version ${app.version}`, size(app.size), app.installed && app.installed !== 'installed' ? `you have ${app.installed}` : ''].filter(Boolean).join('   ·   ');
+  const safety = info && info.safety ? SANDBOX[info.safety.sandbox] : SANDBOX[app.sandbox];
+  return (
+    <FocusScope autoFocus trap onBack={() => { onClose(); return true; }}>
+      <View className="absolute inset-0 w-screen h-screen bg-black/80 items-center justify-center">
+        <View className="w-[900px] p-[34px] gap-[14px] rounded-3xl bg-surface border-2 border-royal">
+          <View className="flex-row gap-[24px]">
+            {app.icon ? <Image source={{uri: app.icon}} resizeMode="contain" className="w-[120px] h-[120px] rounded-2xl" /> : null}
+            <View className="flex-1 gap-[6px]">
+              <Text className={`${T} text-[32px] leading-[40px] font-bold line-clamp-2`}>{app.name}</Text>
+              <Text className="font-inter text-sm text-muted">{meta}</Text>
+              {safety ? <Text className="font-inter text-sm" style={{color: app.sandbox === 'leaves' ? C.coral : C.mint}}>{safety}</Text> : null}
+            </View>
+          </View>
+          {info && readable(info.description) ? <Text className="font-inter text-sm text-text/85 line-clamp-5">{info.description}</Text>
+            : !info ? <Text className="font-inter text-sm text-muted">Reading the catalog…</Text> : null}
+          {b ? (
+            <View className="gap-[6px]">
+              <Text className="font-inter text-sm text-text">{prog.note || 'Working'}</Text>
+              <Bar pct={(prog.pct || 0) / 10} width={830} />
+            </View>
+          ) : null}
+          {prog && prog.state === 'sent' && prog.note ? <Text className="font-inter text-sm text-sky">{prog.note}</Text> : null}
+          {prog && prog.state === 'failed' ? <Text className="font-inter text-sm text-coral">{prog.note}</Text> : null}
+          {note ? <Text className="font-inter text-sm" style={{color: note.bad ? C.coral : C.sky}}>{note.text}</Text> : null}
+          <View className="flex-row gap-[14px] pt-[6px]">
+            {main ? <Button primary label={main} disabled={b} onPress={() => act('install')} /> : <Button label="Not installable here" disabled />}
+            {app.installed && !b ? <Button label="Remove" onPress={() => setAsking(true)} /> : null}
+            <Button label="Close" onPress={onClose} />
+          </View>
+          <Text className="font-inter text-xs text-faint">{`From homebrew.page, checked against its signed catalog. ${app.id}`}</Text>
+        </View>
+      </View>
+      {asking ? <Confirm title={`Remove ${app.name}?`} yes="Remove" body="Its folder is deleted from the PS5. The app's own saved data is left alone."
+        onYes={() => act('uninstall')} onClose={() => setAsking(false)} /> : null}
+    </FocusScope>
+  );
+}
+
+function Homebrew({progress, onChanged}) {
+  const [apps, setApps] = useState(null);
+  const [error, setError] = useState('');
+  const [show, setShow] = useState(0);
+  const [pick, setPick] = useState(null);
+  const load = useCallback(refresh => {
+    api.homebrew(refresh).then(r => { setApps((r.data && r.data.apps) || []); setError(''); }).catch(err => setError(err.message));
+  }, []);
+  useEffect(() => { load(false); }, [load]);
+  // what's installed changes when a job finishes
+  const running = Object.keys(progress).filter(k => k.startsWith('hb:') && busy(progress[k])).length;
+  const was = useRef(0);
+  useEffect(() => {
+    if (was.current && !running) load(false);
+    was.current = running;
+  }, [running, load]);
+  const all = (apps || []).filter(a => a.status === 'available');
+  const list = HB_SHOW[show].test ? all.filter(HB_SHOW[show].test) : all;
+  const updates = all.filter(a => a.update).length;
+  const renderItem = useCallback(({item}) => <HbTile app={item} prog={progress[`hb:${item.id}`]} onPick={setPick} />, [progress]);
+  const picked = pick && (apps || []).find(a => a.id === pick.id);
+  return (
+    <View className="flex-1">
+      <PageTitle kicker="HOMEBREW" title="Homebrew apps"
+        note={error || (apps ? `${all.length} apps from homebrew.page${updates ? ` · ${updates} update${updates === 1 ? '' : 's'}` : ''}` : 'Reading the catalog…')} />
+      <FocusScope autoFocus>
+        <ScrollView className="flex-1">
+          <View scrollAnchor className="flex-row items-center gap-[10px] px-[64px] pt-[14px]">
+            {HB_SHOW.map((s, i) => <Pill key={s.label} label={s.label} on={show === i} onPress={() => setShow(i)} />)}
+            <Pill label="Refresh" onPress={() => load(true)} />
+          </View>
+          <View scrollAnchor className="px-[64px] pt-[16px] pb-[70px]">
+            {list.length ? (
+              <VirtualList data={list} keyExtractor={a => a.id} renderItem={renderItem}
+                numColumns={6} itemHeight={TILE_H} rowGap={26} columnGap={18} />
+            ) : <Text className="font-inter text-base text-muted">{apps ? 'Nothing here.' : ' '}</Text>}
+          </View>
+        </ScrollView>
+      </FocusScope>
+      {picked ? <HbPage app={picked} prog={progress[`hb:${picked.id}`]} onClose={() => setPick(null)} onDone={onChanged} /> : null}
+    </View>
+  );
+}
+
+// on Your PS5: what stopped copies left on the drives
+function Cleanup({onChanged, ask}) {
+  const [scan, setScan] = useState(null);
+  const [busyNow, setBusyNow] = useState(false);
+  const [note, setNote] = useState(null);
+  const run = async () => {
+    setBusyNow(true);
+    setNote(null);
+    try {
+      const r = await api.cleanupScan();
+      setScan(r.data || {items: []});
+    } catch (err) {
+      setNote({text: err.message, bad: true});
+    }
+    setBusyNow(false);
+  };
+  const items = (scan && scan.items) || [];
+  const total = items.reduce((n, it) => n + (it.size > 0 ? it.size : 0), 0);
+  const remove = async () => {
+    setBusyNow(true);
+    try {
+      const r = await api.cleanupDelete(items.map(it => it.path));
+      setNote({text: (r.data && r.data.msg) || 'Done.'});
+      setScan(null);
+      onChanged();
+    } catch (err) {
+      setNote({text: err.message, bad: true});
+    }
+    setBusyNow(false);
+  };
+  return (
+    <Card title="Clean up drives" right={scan ? `${items.length} found` : ''}>
+      <Text className="font-inter text-sm text-muted">Finds what stopped copies leave behind: unfinished uploads, broken game folders, empty images and Loadout's leftovers.</Text>
+      {items.slice(0, 5).map(it => (
+        <View key={it.path} className="gap-[1px]">
+          <Text className={`${T} text-sm truncate w-[500px]`}>{it.path.split('/').pop()}</Text>
+          <Text className="font-inter text-xs text-muted truncate w-[500px]">{[it.reason, it.drive, it.size > 0 ? size(it.size) : ''].filter(Boolean).join(' · ')}</Text>
+        </View>
+      ))}
+      {items.length > 5 ? <Text className="font-inter text-xs text-muted">{`and ${items.length - 5} more`}</Text> : null}
+      {scan && !items.length ? <Text className="font-inter text-sm text-mint">Nothing to clean up.</Text> : null}
+      {scan && scan.kept ? <Text className="font-inter text-xs text-faint">{`${scan.kept} unfinished file${scan.kept === 1 ? ' is' : 's are'} kept: a queued or paused download still needs ${scan.kept === 1 ? 'it' : 'them'}.`}</Text> : null}
+      {note ? <Text className="font-inter text-sm" style={{color: note.bad ? C.coral : C.sky}}>{note.text}</Text> : null}
+      <View className="flex-row gap-[12px]">
+        <Button small label={busyNow ? 'Working…' : scan ? 'Scan again' : 'Scan the drives'} disabled={busyNow} onPress={run} />
+        {items.length ? <Button small primary label={`Delete ${items.length}${total ? ` (${size(total)})` : ''}`} disabled={busyNow} onPress={() => ask({title: `Delete ${items.length} item${items.length === 1 ? '' : 's'}?`, yes: 'Delete',
+          body: `They're deleted from the PS5${total ? `, freeing ${size(total)}` : ''}. This can't be undone.`, onYes: remove})} /> : null}
+      </View>
+    </Card>
   );
 }
 
@@ -665,19 +1062,17 @@ function Downloads({status, onChanged}) {
   };
   return (
     <View className="flex-1">
-      <View className="h-[150px] px-[48px] pt-[12px] gap-[8px]">
-        <Text className={`${T} text-[38px] leading-[46px] font-bold`}>Downloads</Text>
-        <Text className="font-inter text-sm text-muted">{queue.length ? 'Press a download to pause it, move it in the line, or stop just that one.' : 'Nothing is downloading or waiting.'}</Text>
-        {note ? <Text className="font-inter text-sm" style={{color: note.bad ? C.coral : C.sky}}>{note.text}</Text> : null}
-      </View>
+      <PageTitle kicker="DOWNLOADS" title="Downloads"
+        note={queue.length ? 'Press a download to pause it, move it in the line, or stop just that one.' : 'Nothing is downloading or waiting.'} />
+      {note ? <Text className="font-inter text-sm px-[64px] pt-[6px]" style={{color: note.bad ? C.coral : C.sky}}>{note.text}</Text> : null}
       <FocusScope autoFocus>
-        <ScrollView className="flex-1 bg-ink">
+        <ScrollView className="flex-1">
           <View className="gap-[10px] px-[64px] pt-[16px] pb-[40px]">
             {queue.length ? queue.map(q => {
               const sub = [QSTATE[q.state] || q.state, q.state !== 'queued' && q.state !== 'paused' && q.pct ? `${Math.floor(q.pct / 10)}%` : '',
                 q.waits ? (q.waits === 1 ? 'next in line' : `${q.waits} in line`) : '', q.note].filter(Boolean).join('   ·   ');
               return <Row key={q.id} title={q.name} sub={sub} action="Options" onPress={() => setMenu(q)} />;
-            }) : <Row title="Your downloads show here" sub="Download a game from the Games tab" />}
+            }) : <Row title="Your downloads show here" sub="Download a game from Discover or Browse" />}
           </View>
         </ScrollView>
       </FocusScope>
@@ -686,9 +1081,19 @@ function Downloads({status, onChanged}) {
   );
 }
 
-const TABS = ['games', 'emu', 'dl'];
+const TABS = ['games', 'browse', 'library', 'brew', 'emu', 'dl', 'console'];
 
-function Home({games, status, progress, onOpen, onPickRom, tab, setTab, update, onUpdate, onChanged}) {
+const HINTS = {
+  games: [{btn: 'cross', label: 'Open game'}, {btn: 'L1 R1', label: 'Tabs'}],
+  browse: [{btn: 'cross', label: 'Open game'}, {btn: 'L1 R1', label: 'Tabs'}],
+  library: [{btn: 'cross', label: 'Open game'}, {btn: 'L1 R1', label: 'Tabs'}],
+  brew: [{btn: 'cross', label: 'Open app'}, {btn: 'L1 R1', label: 'Tabs'}],
+  emu: [{btn: 'cross', label: 'Download'}, {btn: 'L1 R1', label: 'Tabs'}],
+  dl: [{btn: 'cross', label: 'Options'}, {btn: 'L1 R1', label: 'Tabs'}],
+  console: [{btn: 'cross', label: 'Select'}, {btn: 'L1 R1', label: 'Tabs'}],
+};
+
+function Home({games, status, progress, onOpen, onPickRom, tab, setTab, update, onUpdate, onChanged, drive, setDrive}) {
   const flip = useCallback(action => {
     if (action === 'triangle' && update) {
       onUpdate();
@@ -701,11 +1106,16 @@ function Home({games, status, progress, onOpen, onPickRom, tab, setTab, update, 
   return (
     <FocusScope onAction={flip}>
       <View className="w-screen h-screen bg-ink">
-        {tab === 'games' ? <BackdropFor games={games} /> : <View className="absolute left-0 top-0 w-screen h-[330px] bg-gradient-to-br from-ink2 via-ink to-black" />}
+        {tab === 'games' ? <BackdropFor games={games} /> : <View className="absolute inset-0 bg-gradient-to-b from-ink2 via-ink to-black" />}
         <TopBar tab={tab} setTab={setTab} status={status} update={update} />
         {tab === 'games' ? <Games key="games" games={games} progress={progress} onOpen={onOpen} />
-          : tab === 'emu' ? <Emulators key="emu" progress={progress} onPick={onPickRom} />
-            : <Downloads key="dl" status={status} onChanged={onChanged} />}
+          : tab === 'browse' ? <Browse key="browse" games={games} progress={progress} onOpen={onOpen} />
+            : tab === 'library' ? <Library key="library" games={games} progress={progress} onOpen={onOpen} />
+              : tab === 'brew' ? <Homebrew key="brew" progress={progress} onChanged={onChanged} />
+              : tab === 'emu' ? <Emulators key="emu" progress={progress} onPick={onPickRom} />
+                : tab === 'dl' ? <Downloads key="dl" status={status} onChanged={onChanged} />
+                  : <Console key="console" status={status} drive={drive} setDrive={setDrive} setTab={setTab} onChanged={onChanged} />}
+        <Hints items={HINTS[tab] || HINTS.games} />
       </View>
     </FocusScope>
   );
@@ -926,7 +1336,7 @@ function Detail({game, status, progress, installs, startDLC, drive, setDrive, on
                   </View>
                 ) : null}
                 <View className="flex-row flex-wrap gap-[8px] pt-[2px]">{chips.map(c => <Chip key={c}>{c}</Chip>)}</View>
-                {game.desc ? <Text className="font-inter text-sm text-text/85 line-clamp-4 pt-[4px]">{game.desc}</Text> : null}
+                {readable(game.desc) ? <Text className="font-inter text-sm text-text/85 line-clamp-4 pt-[4px]">{game.desc}</Text> : null}
               </View>
             </View>
             <View className="flex-row items-center gap-[16px] pt-[6px]">
@@ -1060,28 +1470,33 @@ function App() {
   const back = useCallback(() => setOpen(null), []);
   const pickRom = useCallback(r => { setRomNote(null); setRom(r); }, []);
 
-  // the PC has a newer build of this app: get it now, then restart into it
+  // the PC has a newer build of this app. Loadout puts it on the PS5 beside
+  // this one; when it's there, this app closes and Loadout swaps it in.
+  // Nothing in the app's folder changes while it's open or suspended, which
+  // is what made the PS5 refuse to start it.
   const update = !!pcBuild && !!LAUNCHED && pcBuild !== LAUNCHED;
   const startUpdate = useCallback(async () => {
     setUpdating({text: 'Getting the update from your PC…'});
     try {
-      if (readStamp() !== pcBuild) {
+      let state = '';
+      for (let i = 0; i < 400; i++) {
         const r = await api.appUpdate();
-        if (r.data && r.data.state === 'no') throw new Error("Your PC couldn't send the update. Reinstall the app from Loadout's phone page or Settings.");
-        for (let i = 0; i < 300 && readStamp() !== pcBuild; i++) {
-          await sleep(1000);
-          const s = await api.status().catch(() => null);
-          const p = s && s.games && s.games['app:update'];
-          if (p && p.state === 'failed') throw new Error(`The update didn't arrive: ${p.note}`);
-          setUpdating({text: `Updating Loadout${p && p.pct ? ` ${Math.floor(p.pct / 10)}%` : '…'}`});
-        }
-        if (readStamp() !== pcBuild) throw new Error('The update is taking too long. Try again in a moment.');
+        state = (r.data && r.data.state) || '';
+        if (state === 'staged' || state === 'current') break;
+        if (state !== 'queued') throw new Error("Your PC couldn't send the update. Check that Loadout can reach the PS5, then try again.");
+        const s = await api.status().catch(() => null);
+        const p = s && s.games && s.games['app:update'];
+        if (p && p.state === 'failed') throw new Error(`The update didn't arrive: ${p.note}`);
+        setUpdating({text: `Getting the update${p && p.pct ? ` ${Math.floor(p.pct / 10)}%` : '…'}`});
+        await sleep(1500);
       }
-      setUpdating({text: 'Restarting Loadout…'});
-      await sleep(300);
-      if (!BackHandler.exitApp({relaunch: true})) {
-        setUpdating({text: 'Updated. Close Loadout (Options › Close Application) and open it again.', done: true});
-      }
+      if (state === 'queued') throw new Error('The update is taking too long. Try again in a moment.');
+      if (state === 'staged') await api.appSwap();
+      setUpdating({text: 'Loadout will close to finish updating. Open it again in about half a minute.'});
+      await sleep(4000);
+      BackHandler.exitApp();
+      // only seen if the PS5 didn't close it
+      setUpdating({text: 'Close Loadout (Options, then Close Application), wait half a minute and open it again.', done: true});
     } catch (err) {
       setUpdating({text: err.message, bad: true});
     }
@@ -1151,7 +1566,7 @@ function App() {
   return (
     <View className="w-screen h-screen bg-ink">
       <FocusScope inert={!!game || !!rom}>
-        <Home games={games} status={status} progress={progress} onOpen={openGame} onPickRom={pickRom} tab={tab} setTab={setTab} onChanged={refresh}
+        <Home games={games} status={status} progress={progress} onOpen={openGame} onPickRom={pickRom} tab={tab} setTab={setTab} onChanged={refresh} drive={drive} setDrive={setDrive}
           update={update && !updating} onUpdate={startUpdate} />
       </FocusScope>
       {game ? (

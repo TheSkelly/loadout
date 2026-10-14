@@ -2092,6 +2092,31 @@ func (a *App) handler() http.Handler {
 		return nil, a.startPS5Move(b.Paths, b.Drive)
 	})
 	a.fxRoutes(api, func(r *http.Request, v any) { body(r, v) })
+	api("/api/homebrew", func(r *http.Request) (any, error) {
+		var b struct{ Refresh bool }
+		body(r, &b)
+		apps, err := a.homebrewList(b.Refresh)
+		return map[string]any{"apps": apps}, err
+	})
+	api("/api/homebrew/app", func(r *http.Request) (any, error) {
+		var b struct{ ID string }
+		body(r, &b)
+		return a.homebrewDetail(strings.ToUpper(b.ID))
+	})
+	api("/api/homebrew/do", func(r *http.Request) (any, error) {
+		var b struct{ ID, Action string }
+		body(r, &b)
+		return a.startHomebrew(b.ID, b.Action)
+	})
+	api("/api/cleanup/scan", func(r *http.Request) (any, error) {
+		items, kept, err := a.cleanupScan()
+		return map[string]any{"items": items, "kept": kept}, err
+	})
+	api("/api/cleanup/delete", func(r *http.Request) (any, error) {
+		var b struct{ Paths []string }
+		body(r, &b)
+		return a.cleanupDelete(b.Paths)
+	})
 	api("/api/unpack", func(r *http.Request) (any, error) {
 		var b struct{ Images []string }
 		body(r, &b)
