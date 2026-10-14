@@ -304,6 +304,7 @@ function TopBar({tab, setTab, status, update}) {
         <View className="flex-row gap-[10px] pl-[18px]">
           <Tab label="Games" on={tab === 'games'} onPress={() => setTab('games')} />
           <Tab label="Emulators" on={tab === 'emu'} onPress={() => setTab('emu')} />
+          <Tab label={`Downloads${status && status.queue && status.queue.length ? ` · ${status.queue.length}` : ''}`} on={tab === 'dl'} onPress={() => setTab('dl')} />
         </View>
       </FocusScope>
       <Text className="font-inter text-xs text-faint">L1 / R1</Text>
@@ -323,8 +324,148 @@ function TopBar({tab, setTab, status, update}) {
   );
 }
 
+// ---------- finding a game: search, filters, sort, favourites ----------
+
+// favourites live on this PS5, in the app's data folder
+const FAVS = `${FileSystem.dataDir}/loadout-favs.json`;
+const favStore = {keys: new Set(), listeners: new Set()};
+try {
+  const saved = JSON.parse(FileSystem.readFile(FAVS));
+  if (Array.isArray(saved)) favStore.keys = new Set(saved);
+} catch (err) {
+  // none yet
+}
+function toggleFav(key) {
+  const keys = new Set(favStore.keys);
+  if (keys.has(key)) keys.delete(key); else keys.add(key);
+  favStore.keys = keys;
+  try { FileSystem.writeFile(FAVS, JSON.stringify([...keys])); } catch (err) { /* kept until the app closes */ }
+  for (const fn of favStore.listeners) fn(keys);
+}
+function useFavs() {
+  const [keys, setKeys] = useState(favStore.keys);
+  useEffect(() => {
+    favStore.listeners.add(setKeys);
+    return () => favStore.listeners.delete(setKeys);
+  }, []);
+  return keys;
+}
+
+const GB = 1e9;
+// each filter is a list of choices; pressing it moves to the next
+const FILTERS = {
+  platform: [{label: 'All platforms'}, {label: 'PS5', test: g => g.platform === 'PS5'}, {label: 'PS4', test: g => g.platform === 'PS4'}],
+  format: [{label: 'Any format'}, {label: 'Image ready', test: g => g.ready}, {label: 'Folder only', test: g => !g.ready}],
+  size: [{label: 'Any size'}, {label: 'Under 20 GB', test: g => g.size < 20 * GB}, {label: '20 to 50 GB', test: g => g.size >= 20 * GB && g.size < 50 * GB},
+    {label: 'Over 50 GB', test: g => g.size >= 50 * GB}],
+  where: [{label: 'Anywhere'}, {label: 'Not on PS5', test: g => !g.onPs5}, {label: 'On PS5', test: g => !!g.onPs5}],
+};
+const SORTS = [
+  {label: 'A to Z', by: byName},
+  {label: 'Newest', by: (a, b) => seen(b.firstSeen) - seen(a.firstSeen) || byName(a, b)},
+  {label: 'Largest', by: (a, b) => (b.size || 0) - (a.size || 0) || byName(a, b)},
+  {label: 'Smallest', by: (a, b) => (a.size || 0) - (b.size || 0) || byName(a, b)},
+  {label: 'Top rated', by: (a, b) => (b.rating || 0) - (a.rating || 0) || byName(a, b)},
+];
+const NO_FIND = {text: '', platform: 0, format: 0, size: 0, where: 0, sort: 0, favs: false};
+const finding = f => !!f.text || f.platform || f.format || f.size || f.where || f.favs;
+
+// words match anywhere in the name or title ID, in any order
+function findGames(games, f, favs) {
+  const words = f.text.toLowerCase().split(' ').filter(Boolean);
+  const tests = Object.keys(FILTERS).map(k => FILTERS[k][f[k]].test).filter(Boolean);
+  return games.filter(g => {
+    if (f.favs && !favs.has(g.key)) return false;
+    if (tests.some(t => !t(g))) return false;
+    const hay = `${g.name} ${g.id || ''}`.toLowerCase();
+    return words.every(w => hay.includes(w));
+  }).sort(SORTS[f.sort].by);
+}
+
+function Pill({label, on, onPress}) {
+  return on ? (
+    <View onPress={onPress} className="px-[16px] py-[7px] rounded-full bg-accent border-[3px] border-transparent focused:border-text">
+      <Text className="font-inter text-sm font-bold text-ink">{label}</Text>
+    </View>
+  ) : (
+    <View onPress={onPress} className="px-[16px] py-[7px] rounded-full bg-surface/90 border-[3px] border-transparent focused:border-accent">
+      <Text className="font-inter text-sm text-text">{label}</Text>
+    </View>
+  );
+}
+
+function FindBar({find, setFind, onSearch}) {
+  const next = k => setFind(f => Object.assign({}, f, {[k]: (f[k] + 1) % FILTERS[k].length}));
+  return (
+    <View scrollAnchor className="flex-row flex-wrap items-center gap-[10px] px-[48px] pt-[14px]">
+      <Pill label={find.text ? `Search: ${find.text}` : 'Search'} on={!!find.text} onPress={onSearch} />
+      {Object.keys(FILTERS).map(k => <Pill key={k} label={FILTERS[k][find[k]].label} on={find[k] > 0} onPress={() => next(k)} />)}
+      <Pill label={find.favs ? '★ Favourites' : 'Favourites'} on={find.favs} onPress={() => setFind(f => Object.assign({}, f, {favs: !f.favs}))} />
+      <Pill label={`Sort: ${SORTS[find.sort].label}`} on={find.sort > 0} onPress={() => setFind(f => Object.assign({}, f, {sort: (f.sort + 1) % SORTS.length}))} />
+      {finding(find) || find.sort ? <Pill label="Clear" onPress={() => setFind(NO_FIND)} /> : null}
+    </View>
+  );
+}
+
+// the PS5 React keyboard isn't in console builds: letters on a grid instead
+const KEYS = ['ABCDEFGHIJ', 'KLMNOPQRST', 'UVWXYZ0123', '456789:-\'&'];
+function Key({label, wide, onPress}) {
+  return wide ? (
+    <View onPress={onPress} className="w-[178px] h-[56px] items-center justify-center rounded-xl bg-raised border-[3px] border-transparent focused:border-accent focused:bg-royal">
+      <Text className="font-inter text-base text-text">{label}</Text>
+    </View>
+  ) : (
+    <View onPress={onPress} className="w-[56px] h-[56px] items-center justify-center rounded-xl bg-raised border-[3px] border-transparent focused:border-accent focused:bg-royal">
+      <Text className="font-inter text-lg font-bold text-text">{label}</Text>
+    </View>
+  );
+}
+
+function Keyboard({text, count, onText, onClose}) {
+  const type = c => onText((text + c).slice(0, 40));
+  const keys = useCallback(action => {
+    if (action === 'square') { onText(text.slice(0, -1)); return true; }
+    if (action === 'triangle') { onText((text + ' ').slice(0, 40)); return true; }
+    return false;
+  }, [text, onText]);
+  return (
+    <FocusScope autoFocus trap onAction={keys} onBack={() => { onClose(); return true; }}>
+      <View className="absolute inset-0 w-screen h-screen bg-black/75 items-center justify-center">
+        <View className="p-[30px] gap-[14px] rounded-3xl bg-surface border-2 border-royal">
+          <Text className="font-inter text-xs text-faint tracking-widest">SEARCH YOUR GAMES</Text>
+          <View className="w-[638px] h-[58px] px-[18px] justify-center rounded-xl bg-ink border-2 border-line">
+            <Text className={`${T} text-xl`}>{text ? `${text}_` : '_'}</Text>
+          </View>
+          <Text className="font-inter text-sm text-muted">{text ? `${count} game${count === 1 ? '' : 's'} match` : 'Type a few letters of the name'}</Text>
+          {KEYS.map(row => (
+            <View key={row} className="flex-row gap-[8px]">
+              {row.split('').map(c => <Key key={c} label={c} onPress={() => type(c)} />)}
+            </View>
+          ))}
+          <View className="flex-row gap-[8px]">
+            <Key wide label="Space" onPress={() => type(' ')} />
+            <Key wide label="Delete" onPress={() => onText(text.slice(0, -1))} />
+            <Key wide label="Clear" onPress={() => onText('')} />
+          </View>
+          <View className="flex-row items-center gap-[14px] pt-[4px]">
+            <Button primary label="Done" onPress={onClose} />
+            <Text className="font-inter text-xs text-faint">Square deletes · Triangle adds a space · Circle closes</Text>
+          </View>
+        </View>
+      </View>
+    </FocusScope>
+  );
+}
+
+// the search and filters outlast leaving the tab or opening a game
+let lastFind = NO_FIND;
+
 function Games({games, progress, onOpen}) {
   const [spot, setSpot] = useState(null);
+  const [find, setFindState] = useState(lastFind);
+  const [typing, setTyping] = useState(false);
+  const setFind = useCallback(f => setFindState(old => (lastFind = typeof f === 'function' ? f(old) : f)), []);
+  const favs = useFavs();
   const shelves = useMemo(() => {
     const moving = games.filter(g => busy(progress[g.key]));
     const recent = games.filter(g => seen(g.firstSeen)).sort((a, b) => seen(b.firstSeen) - seen(a.firstSeen) || byName(a, b)).slice(0, 15);
@@ -336,11 +477,20 @@ function Games({games, progress, onOpen}) {
     for (const g of games) for (const x of g.genres || []) count[x] = (count[x] || 0) + 1;
     const genres = Object.keys(count).filter(x => count[x] >= 4).sort((a, b) => count[b] - count[a]).slice(0, 3)
       .map(x => ({name: x, games: games.filter(g => (g.genres || []).includes(x))}));
-    return {moving, recent, notOn, onPs5, dlc, genres};
-  }, [games, progress]);
+    const fav = games.filter(g => favs.has(g.key));
+    return {moving, recent, notOn, onPs5, dlc, genres, fav};
+  }, [games, progress, favs]);
+  const found = useMemo(() => finding(find) ? findGames(games, find, favs) : null, [games, find, favs]);
+  const all = useMemo(() => find.sort ? [...games].sort(SORTS[find.sort].by) : games, [games, find.sort]);
   const onSpot = useCallback(key => { setSpot(key); tellSpot(key); }, []);
   const renderItem = useCallback(({item}) => <Tile game={item} prog={progress[item.key]} onOpen={onOpen} onSpot={onSpot} />, [progress, onOpen, onSpot]);
-  const game = games.find(g => g.key === spot) || shelves.recent[0] || games[0];
+  const game = games.find(g => g.key === spot) || (found && found[0]) || shelves.recent[0] || games[0];
+  const grid = list => (
+    <View className="px-[48px] pt-[6px]">
+      <VirtualList data={list} keyExtractor={g => g.key} renderItem={renderItem}
+        numColumns={6} itemHeight={TILE_H} rowGap={26} columnGap={25} />
+    </View>
+  );
   return (
     <View className="flex-1">
       <View className="h-[258px]">
@@ -348,22 +498,31 @@ function Games({games, progress, onOpen}) {
       </View>
       <FocusScope autoFocus>
         <ScrollView className="flex-1 bg-ink">
+          <FindBar find={find} setFind={setFind} onSearch={() => setTyping(true)} />
+          {found ? (
+            <View scrollAnchor className="gap-[14px] pt-[16px] pb-[48px]">
+              <Heading title="Results" note={`${found.length} game${found.length === 1 ? '' : 's'}, ${SORTS[find.sort].label}`} />
+              {found.length ? grid(found) : <Text className="font-inter text-base text-muted px-[48px]">Nothing matches. Change the search or press Clear.</Text>}
+            </View>
+          ) : null}
+          {found ? null : <View>
           <Shelf id="moving" title="Downloading" games={shelves.moving} progress={progress} onOpen={onOpen} onSpot={onSpot} />
+          <Shelf id="fav" title="Favourites" games={shelves.fav} progress={progress} onOpen={onOpen} onSpot={onSpot} />
           <Shelf id="recent" title="New in your library" games={shelves.recent} progress={progress} onOpen={onOpen} onSpot={onSpot} />
           <Shelf id="noton" title="Ready for your PS5" note={`${shelves.notOn.length} games`} games={shelves.notOn} progress={progress} onOpen={onOpen} onSpot={onSpot} />
           <Shelf id="dlc" title="DLC to install" note="open a game to install its DLC" games={shelves.dlc} progress={progress} onOpen={onOpen} onSpot={onSpot} />
           {shelves.genres.map(x => <Shelf key={x.name} id={`g:${x.name}`} title={x.name} games={x.games} progress={progress} onOpen={onOpen} onSpot={onSpot} />)}
           <Shelf id="onps5" title="On your PS5" games={shelves.onPs5} progress={progress} onOpen={onOpen} onSpot={onSpot} />
           <View scrollAnchor className="gap-[14px] pt-[16px] pb-[48px]">
-            <Heading title="All games" note={`${games.length}, A to Z`} />
-            <View className="px-[48px] pt-[6px]">
-              <VirtualList data={games} keyExtractor={g => g.key} renderItem={renderItem}
-                numColumns={6} itemHeight={TILE_H} rowGap={26} columnGap={25} />
-            </View>
+            <Heading title="All games" note={`${games.length}, ${SORTS[find.sort].label}`} />
+            {grid(all)}
           </View>
+          </View>}
           {!games.length ? <Text className="font-inter text-base text-muted px-[48px] pt-[30px]">No games in Loadout yet. Pick your games folder in Loadout on the PC.</Text> : null}
         </ScrollView>
       </FocusScope>
+      {typing ? <Keyboard text={find.text} count={found ? found.length : games.length}
+        onText={text => setFind(f => Object.assign({}, f, {text}))} onClose={() => setTyping(false)} /> : null}
     </View>
   );
 }
@@ -463,14 +622,80 @@ function Emulators({progress, onPick}) {
   );
 }
 
-function Home({games, status, progress, onOpen, onPickRom, tab, setTab, update, onUpdate}) {
+// the PS5 queue, one download at a time
+const QSTATE = {queued: 'Waiting', paused: 'Paused', sending: 'Downloading', copying: 'Copying', moving: 'Moving',
+  deleting: 'Deleting', saving: 'Backing up', restoring: 'Restoring'};
+
+function Menu({title, items, onClose}) {
+  return (
+    <FocusScope autoFocus trap onBack={() => { onClose(); return true; }}>
+      <View className="absolute inset-0 w-screen h-screen bg-black/70 items-center justify-center">
+        <View className="w-[520px] p-[28px] gap-[12px] rounded-3xl bg-surface border-2 border-royal">
+          <Text className={`${T} text-xl font-bold line-clamp-2`}>{title}</Text>
+          {items.map(it => <Button key={it.label} label={it.label} primary={it.primary} onPress={() => { onClose(); it.onPress(); }} />)}
+          <Button label="Cancel" onPress={onClose} />
+        </View>
+      </View>
+    </FocusScope>
+  );
+}
+
+function Downloads({status, onChanged}) {
+  const [menu, setMenu] = useState(null);
+  const [note, setNote] = useState(null);
+  const queue = (status && status.queue) || [];
+  const act = async (q, action) => {
+    try {
+      await api.job(q.id, action);
+      setNote(null);
+      onChanged();
+    } catch (err) {
+      setNote({text: err.message, bad: true});
+    }
+  };
+  const choices = q => {
+    const running = q.state !== 'queued' && q.state !== 'paused';
+    return [
+      q.state === 'queued' && q.waits > 1 ? {label: 'Move up', onPress: () => act(q, 'up')} : null,
+      q.state === 'queued' ? {label: 'Move down', onPress: () => act(q, 'down')} : null,
+      running ? {label: 'Pause', onPress: () => act(q, 'pause')} : null,
+      q.state === 'paused' ? {label: 'Resume', primary: true, onPress: () => act(q, 'resume')} : null,
+      {label: 'Stop this download', onPress: () => act(q, 'stop')},
+    ].filter(Boolean);
+  };
+  return (
+    <View className="flex-1">
+      <View className="h-[150px] px-[48px] pt-[12px] gap-[8px]">
+        <Text className={`${T} text-[38px] leading-[46px] font-bold`}>Downloads</Text>
+        <Text className="font-inter text-sm text-muted">{queue.length ? 'Press a download to pause it, move it in the line, or stop just that one.' : 'Nothing is downloading or waiting.'}</Text>
+        {note ? <Text className="font-inter text-sm" style={{color: note.bad ? C.coral : C.sky}}>{note.text}</Text> : null}
+      </View>
+      <FocusScope autoFocus>
+        <ScrollView className="flex-1 bg-ink">
+          <View className="gap-[10px] px-[64px] pt-[16px] pb-[40px]">
+            {queue.length ? queue.map(q => {
+              const sub = [QSTATE[q.state] || q.state, q.state !== 'queued' && q.state !== 'paused' && q.pct ? `${Math.floor(q.pct / 10)}%` : '',
+                q.waits ? (q.waits === 1 ? 'next in line' : `${q.waits} in line`) : '', q.note].filter(Boolean).join('   ·   ');
+              return <Row key={q.id} title={q.name} sub={sub} action="Options" onPress={() => setMenu(q)} />;
+            }) : <Row title="Your downloads show here" sub="Download a game from the Games tab" />}
+          </View>
+        </ScrollView>
+      </FocusScope>
+      {menu ? <Menu title={menu.name} items={choices(menu)} onClose={() => setMenu(null)} /> : null}
+    </View>
+  );
+}
+
+const TABS = ['games', 'emu', 'dl'];
+
+function Home({games, status, progress, onOpen, onPickRom, tab, setTab, update, onUpdate, onChanged}) {
   const flip = useCallback(action => {
     if (action === 'triangle' && update) {
       onUpdate();
       return true;
     }
     if (action !== 'l1' && action !== 'r1') return false;
-    setTab(t => t === 'games' ? 'emu' : 'games');
+    setTab(t => TABS[(TABS.indexOf(t) + (action === 'r1' ? 1 : TABS.length - 1)) % TABS.length]);
     return true;
   }, [setTab, update, onUpdate]);
   return (
@@ -478,9 +703,9 @@ function Home({games, status, progress, onOpen, onPickRom, tab, setTab, update, 
       <View className="w-screen h-screen bg-ink">
         {tab === 'games' ? <BackdropFor games={games} /> : <View className="absolute left-0 top-0 w-screen h-[330px] bg-gradient-to-br from-ink2 via-ink to-black" />}
         <TopBar tab={tab} setTab={setTab} status={status} update={update} />
-        {tab === 'games'
-          ? <Games key="games" games={games} progress={progress} onOpen={onOpen} />
-          : <Emulators key="emu" progress={progress} onPick={onPickRom} />}
+        {tab === 'games' ? <Games key="games" games={games} progress={progress} onOpen={onOpen} />
+          : tab === 'emu' ? <Emulators key="emu" progress={progress} onPick={onPickRom} />
+            : <Downloads key="dl" status={status} onChanged={onChanged} />}
       </View>
     </FocusScope>
   );
@@ -678,6 +903,7 @@ function Detail({game, status, progress, installs, startDLC, drive, setDrive, on
   const label = b ? `${WORD[prog.state] || prog.state}…` : game.onPs5 ? 'Download again' : 'Download';
   const shots = game.lib ? Math.min(game.shots || 0, 6) : 0;
   const shown = note || message;
+  const fav = useFavs().has(game.key);
   return (
     <FocusScope autoFocus trap onBack={() => { onBack(); return true; }}>
       <View className="w-screen h-screen bg-ink">
@@ -705,8 +931,9 @@ function Detail({game, status, progress, installs, startDLC, drive, setDrive, on
             </View>
             <View className="flex-row items-center gap-[16px] pt-[6px]">
               <Button primary label={label} onPress={() => { setNote(null); onDownload(); }} disabled={b || !game.canGet} />
+              <Button label={fav ? '★ Favourite' : 'Add to favourites'} onPress={() => toggleFav(game.key)} />
               <Button label="Back" onPress={onBack} />
-              {where ? <Text className="font-inter text-sm pl-[8px] truncate w-[620px]" style={{color: st ? st.color : C.muted}}>{where}</Text> : null}
+              {where ? <Text className="font-inter text-sm pl-[8px] truncate w-[420px]" style={{color: st ? st.color : C.muted}}>{where}</Text> : null}
             </View>
             {drives.length ? (
               <View className="gap-[8px]">
@@ -924,7 +1151,7 @@ function App() {
   return (
     <View className="w-screen h-screen bg-ink">
       <FocusScope inert={!!game || !!rom}>
-        <Home games={games} status={status} progress={progress} onOpen={openGame} onPickRom={pickRom} tab={tab} setTab={setTab}
+        <Home games={games} status={status} progress={progress} onOpen={openGame} onPickRom={pickRom} tab={tab} setTab={setTab} onChanged={refresh}
           update={update && !updating} onUpdate={startUpdate} />
       </FocusScope>
       {game ? (

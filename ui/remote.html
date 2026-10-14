@@ -36,6 +36,9 @@ h2 { font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: v
 .jobs li:first-child { border-top: 0; }
 .jobs .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .jobs .s { color: var(--muted); font-size: 12.5px; text-align: right; max-width: 55%; }
+.jobs .ctl { display: flex; gap: 4px; flex: none; }
+.jobs .ctl button { padding: 3px 8px; border-radius: 7px; border: 1px solid var(--line); background: var(--raised); color: var(--text); font-size: 12px; }
+.jobs .ctl button.x { color: var(--coral); }
 .jobs .s.ok { color: var(--mint); } .jobs .s.bad { color: var(--coral); } .jobs .s.run { color: var(--accent); }
 .drives { display: flex; gap: 8px; flex-wrap: wrap; }
 .drives span { background: var(--raised); border-radius: 10px; padding: 8px 12px; font-size: 13px; color: var(--muted); }
@@ -215,8 +218,12 @@ function render() {
   $("#jobs").innerHTML = S.jobs.map(j => {
     const live = ["building", "verifying", "sending", "moving", "deleting", "removing"].includes(j.state);
     const cls = j.state === "done" ? "ok" : j.state === "failed" ? "bad" : live ? "run" : "";
-    const label = { queued: "Queued", building: "Building " + Math.floor(j.pct / 10) + "%", verifying: "Checking " + Math.floor(j.pct / 10) + "%", sending: "Sending " + Math.floor(j.pct / 10) + "%", moving: "Moving " + Math.floor(j.pct / 10) + "%", deleting: "Deleting", removing: "Removing folder", done: j.note || "Done", failed: "Failed: " + j.note, cancelled: "Stopped", skipped: "Already built" }[j.state] || j.state;
-    return `<li><span class="n">${esc(j.name)}</span><span class="s ${cls}">${esc(label)}${live && j.note && !/^\(/.test(j.note) ? "" : j.note && /^\(/.test(j.note) ? " " + esc(j.note) : ""}</span></li>`;
+    const label = { paused: "Paused", copying: "Copying " + Math.floor(j.pct / 10) + "%", queued: "Queued", building: "Building " + Math.floor(j.pct / 10) + "%", verifying: "Checking " + Math.floor(j.pct / 10) + "%", sending: "Sending " + Math.floor(j.pct / 10) + "%", moving: "Moving " + Math.floor(j.pct / 10) + "%", deleting: "Deleting", removing: "Removing folder", done: j.note || "Done", failed: "Failed: " + j.note, cancelled: "Stopped", skipped: "Already built" }[j.state] || j.state;
+    // one job's own controls: move a waiting one, pause or resume, stop
+    const ctl = !j.ctl ? "" : `<span class="ctl">${j.state === "queued" ? `<button data-job="${j.id}" data-a="up" title="Move up">↑</button><button data-job="${j.id}" data-a="down" title="Move down">↓</button>` : ""}${
+      live || j.state === "copying" ? `<button data-job="${j.id}" data-a="pause">Pause</button>` : ""}${j.state === "paused" || j.state === "failed" || j.state === "cancelled" ? `<button data-job="${j.id}" data-a="resume">${j.state === "paused" ? "Resume" : "Retry"}</button>` : ""}${
+      ["queued", "paused", "copying"].includes(j.state) || live ? `<button class="x" data-job="${j.id}" data-a="stop" title="Stop this one">✕</button>` : ""}</span>`;
+    return `<li><span class="n">${esc(j.name)}</span><span class="s ${cls}">${esc(label)}${live && j.note && !/^\(/.test(j.note) ? "" : j.note && /^\(/.test(j.note) ? " " + esc(j.note) : ""}</span>${ctl}</li>`;
   }).join("");
   const ds = (S.drives || []).filter(d => d.free >= 0);
   $("#drvHead").hidden = !ds.length;
@@ -295,6 +302,11 @@ document.addEventListener("click", async e => {
     try { const r = await call("/r/payload", { i, name: pb.dataset.pname }); toast((r.data && r.data.msg) || "Sent."); }
     catch (err) { if (err.message !== "locked") toast(err.message, true); }
     sending.delete(i); poll();
+    return;
+  }
+  const jb = e.target.closest("[data-job]");
+  if (jb) {
+    try { await call("/r/job", { id: +jb.dataset.job, action: jb.dataset.a }); poll(); } catch (err) { if (err.message !== "locked") toast(err.message, true); }
     return;
   }
   const st = e.target.closest("[data-stop]");

@@ -1005,7 +1005,7 @@ function renderDock() {
       <div class="track"><i style="width:${overallPct() / 10}%"></i></div>
       ${b.building ? `<button class="btn danger sm" data-act="stopbuild">Stop</button>` : `<span></span>`}</div>`);
   }
-  const pjobs = jobs.filter(x => (x.kind === "build" && x.send) || ["send", "ps5del", "ps5move", "savebak", "saverest", "savedel", "fxup", "fxdown", "fxupdir", "fxzip", "fxzipflat", "pkginst"].includes(x.kind));
+  const pjobs = jobs.filter(x => (x.kind === "build" && x.send) || ["send", "sendfolder", "ps5del", "ps5move", "savebak", "saverest", "savedel", "fxup", "fxdown", "fxupdir", "fxzip", "fxzipflat", "pkginst"].includes(x.kind));
   if (pjobs.length) {
     const fin = ["sent", "done", "failed", "cancelled", "skipped"];
     const doneN = pjobs.filter(x => fin.includes(ps5State(x))).length;
@@ -1017,9 +1017,27 @@ function renderDock() {
     const sub = cur && ps5State(cur) === "deleting" ? esc(cur.note || "") : `${doneN} of ${pjobs.length} done${b.sendSpeed && cur ? ", " + size(b.sendSpeed) + "/s" : ""}${b.sendEta && cur ? ", " + dur(b.sendEta) + " left" : ""}${b.sendSlow && cur ? ", " + esc(b.sendSlow) : ""}`;
     lanes.push(`<div class="lane"><div class="what">${what}<small>${sub}</small></div>
       <div class="track send"><i style="width:${pct / 10}%"></i></div>
-      ${b.ps5Busy ? `<button class="btn danger sm" data-act="stopps5">Stop</button>` : `<span></span>`}</div>`);
+      <span class="lanebtns">${pjobs.some(x => x.kind !== "build" && ["queued", "paused"].includes(x.state) || b.ps5Busy) ? `<button class="btn ghost sm" data-act="ps5queue" title="Stop, pause or reorder one job">Queue</button>` : ""}${b.ps5Busy ? `<button class="btn danger sm" data-act="stopps5" title="Stops everything going to the PS5">Stop all</button>` : ""}</span></div>`);
   }
   dock.innerHTML = lanes.join("");
+}
+
+// the PS5 queue, one job at a time: move a waiting one, pause, resume, stop
+async function showQueue() {
+  const own = j => j.kind !== "build" && j.kind !== "remove" && j.kind !== "unpack";
+  const live = ["sending", "copying", "moving", "deleting", "saving", "restoring"];
+  const rows = S.build.jobs.filter(j => own(j) && (live.includes(j.state) || ["queued", "paused"].includes(j.state)));
+  if (!rows.length) { toast("Nothing is waiting for the PS5."); return; }
+  const btn = (j, a, label, cls) => `<button class="btn ${cls || "ghost"} sm" data-pick="${a}:${j.id}">${label}</button>`;
+  const r = await modal(`<h3>Going to the PS5</h3><p>Stop or pause one game without touching the others. Waiting games go in the order shown.</p>
+    <ul class="ftplist">${rows.map(j => `<li><div class="qrow"><span class="grow"><b>${esc(j.name)}</b><small>${
+      j.state === "queued" ? "Waiting" : j.state === "paused" ? "Paused" : esc(j.state) + " " + Math.floor((j.pct || 0) / 10) + "%"}</small></span>${
+      j.state === "queued" ? btn(j, "up", "↑") + btn(j, "down", "↓") : ""}${live.includes(j.state) ? btn(j, "pause", "Pause") : ""}${
+      j.state === "paused" ? btn(j, "resume", "Resume", "primary") : ""}${btn(j, "stop", "Stop", "danger")}</div></li>`).join("")}</ul>`, [{ label: "Close" }]);
+  if (!r || !r.pick) return;
+  const [a, id] = r.pick.split(":");
+  await act("job", { ID: +id, Action: a });
+  setTimeout(showQueue, 400); // back to the list, with the change in it
 }
 
 // ---------------- settings ----------------
@@ -1384,6 +1402,7 @@ document.addEventListener("click", async e => {
     case "showimg": return act("open", { path: it.image, select: true });
     case "showpkg": return act("open", { path: it.path, select: true });
     case "pkginstall": return act("pkg/install", { Key: k });
+    case "ps5queue": return showQueue();
     case "unpack": return act("unpack", { Images: [b.dataset.img] }, "Turning the image into a game folder. Progress shows under Build & send.");
     case "sendfolder": return act("sendfolder", { Keys: [k], Drive: defDrive() }, "Sending the game folder to the PS5. Progress shows under Build & send.");
     case "build1": return buildKeys([k]);

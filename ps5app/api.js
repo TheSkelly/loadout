@@ -115,6 +115,8 @@ export const api = {
   roms: () => call(`${base}/s/roms`, {maxBytes: 4 * 1024 * 1024}),
   romGet: key => call(`${base}/s/roms/get`, {body: {Key: key}}),
   appUpdate: () => call(`${base}/s/app/update`, {body: {}}),
+  // one download in the queue: stop, pause, resume, up or down
+  job: (id, action) => call(`${base}/s/job`, {body: {ID: id, Action: action}}),
 };
 
 // art is a picture URL; pictures can't carry headers, so the token rides along.

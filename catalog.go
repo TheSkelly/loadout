@@ -311,6 +311,7 @@ type storeStatus struct {
 	Games   map[string]storeProgress `json:"games"` // only games with something going on
 	Drives  []PS5Drive               `json:"drives"`
 	Drive   string                   `json:"drive"`
+	Queue   []queueItem              `json:"queue"` // the PS5 lane, in order
 }
 
 // storeProgressLocked is where each game is in the build and send queues.
@@ -414,7 +415,7 @@ func (a *App) storeStatusLocked() storeStatus {
 	rs.PS5.What = strings.Replace(rs.PS5.What, "Sending ", "Downloading ", 1)
 	rs.Build.What = strings.Replace(rs.Build.What, "Building ", "Preparing ", 1)
 	return storeStatus{Version: rs.Version, PC: rs.PC, Online: rs.Online, HasPS5: rs.HasPS5, Build: rs.Build, PS5: rs.PS5,
-		Games: a.storeProgressLocked(), Drives: rs.Drives, Drive: rs.Drive}
+		Games: a.storeProgressLocked(), Drives: rs.Drives, Drive: rs.Drive, Queue: a.queueLocked()}
 }
 
 // storeGet builds (when needed) and sends one game to the PS5. Its messages
@@ -736,6 +737,15 @@ func (a *App) storeRoutes(mux *http.ServeMux, rs *remoteServer, writeJSON func(h
 	// the PS5 app asks for its update now, then restarts itself once it's in
 	mux.HandleFunc("/s/app/update", post(func(r *http.Request) (any, error) {
 		return map[string]string{"state": a.updatePS5App(true)}, nil
+	}))
+	// one job: stop, pause, resume, up or down
+	mux.HandleFunc("/s/job", post(func(r *http.Request) (any, error) {
+		var b struct {
+			ID     int
+			Action string
+		}
+		json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&b)
+		return nil, a.jobAction(b.ID, b.Action)
 	}))
 	mux.HandleFunc("/s/stop", post(func(r *http.Request) (any, error) {
 		var b struct{ Lane string }

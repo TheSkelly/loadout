@@ -93,6 +93,7 @@ func boolOr(b *bool, def bool) bool {
 }
 
 type BuildJob struct {
+	ID        int    `json:"id"` // for stopping, pausing or moving this one job
 	Key       string `json:"key"`
 	Kind      string `json:"kind"` // "build" or "remove"
 	Name      string `json:"name"`
@@ -106,6 +107,8 @@ type BuildJob struct {
 	image     string // for remove jobs (and the PS5 path for ps5del jobs)
 	remoteDir bool   // ps5del: the PS5 copy is a folder
 	gen       int32  // PS5 lane stop counter when this job was queued
+	stop      int32  // set (atomically) to stop just this job
+	pause     bool   // ...and it's a pause: it can be resumed
 	only      string // a ZIP install that must be this one app folder (an update)
 	save      *PS5Save
 	contentID string             // pkginst: the package's content ID, needed for PS5 packages
@@ -174,6 +177,7 @@ type App struct {
 	ps5st       ps5Stats
 	laneNotes   []string
 	ps5stop     int32 // goes up each time the PS5 lane is stopped
+	jobSeq      int   // the last job id given out
 	ps5busyAt   time.Time
 	imgCache    map[string]string
 	artKick     chan string
@@ -2226,6 +2230,14 @@ func (a *App) handler() http.Handler {
 			ents = []ftpEntry{}
 		}
 		return map[string]any{"dir": dir, "entries": ents}, nil
+	})
+	api("/api/job", func(r *http.Request) (any, error) {
+		var b struct {
+			ID     int
+			Action string
+		}
+		body(r, &b)
+		return nil, a.jobAction(b.ID, b.Action)
 	})
 	api("/api/build/cancel", func(r *http.Request) (any, error) {
 		var b struct{ Lane string } // "build", "ps5", or "" for both

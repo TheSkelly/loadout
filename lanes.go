@@ -27,6 +27,10 @@ func (a *App) addJobsLocked(jobs []*BuildJob) {
 		a.build = BuildState{}
 		a.laneNotes = nil
 	}
+	for _, j := range jobs {
+		a.jobSeq++
+		j.ID = a.jobSeq
+	}
 	a.build.Jobs = append(a.build.Jobs, jobs...)
 	a.build.Running = true
 	a.build.Summary = ""
@@ -161,10 +165,11 @@ func (a *App) runPS5Job(j *BuildJob) {
 	}
 	ok := map[bool]string{true: "sent", false: "done"}[j.Kind == "build"]
 	if stopped {
-		setState("cancelled", "")
 		a.mu.Lock()
-		a.ps5st.stopped = true
+		paused := j.pause
+		a.ps5st.stopped = a.ps5st.stopped || atomic.LoadInt32(&j.stop) == 0 // the whole lane was stopped
 		a.mu.Unlock()
+		setState(map[bool]string{true: "paused", false: "cancelled"}[paused], "")
 		return
 	}
 	var note string
@@ -229,11 +234,17 @@ wait:
 	defer a.mu.Unlock()
 	switch {
 	case errors.Is(err, ErrCancelled) || errors.Is(err, errFTPCancelled) || (err != nil && a.ps5Stopped(j)):
-		a.ps5st.stopped = true
+		if atomic.LoadInt32(&j.stop) == 0 {
+			a.ps5st.stopped = true // the whole lane was stopped, not just this job
+		}
+		state := "cancelled"
+		if j.pause {
+			state = "paused"
+		}
 		if j.Kind == "build" {
-			j.SendState, j.SendNote = "cancelled", note
+			j.SendState, j.SendNote = state, note
 		} else {
-			j.State, j.Note = "cancelled", note
+			j.State, j.Note = state, note
 		}
 	case err != nil:
 		if j.Kind == "build" {
@@ -287,5 +298,5 @@ func (a *App) finishLaneLocked(note string) {
 // ps5Stopped reports whether the PS5 lane was stopped after job j was queued.
 // Jobs queued after a stop are not affected by it.
 func (a *App) ps5Stopped(j *BuildJob) bool {
-	return atomic.LoadInt32(&a.ps5stop) != j.gen
+	return atomic.LoadInt32(&a.ps5stop) != j.gen || atomic.LoadInt32(&j.stop) != 0
 }

@@ -30,13 +30,13 @@ const defaultRemotePort = 8787
 
 // RemoteInfo is what Settings shows about the phone page.
 type RemoteInfo struct {
-	On        bool     `json:"on"`
-	Running   bool     `json:"running"`
-	Port      int      `json:"port"`
-	URLs      []string `json:"urls"`      // every address the page answers on
-	Tailscale string   `json:"tailscale"` // the Tailscale address, if this PC has one
-	Err       string   `json:"err"`
-	HasPIN    bool     `json:"hasPin"`
+	On        bool              `json:"on"`
+	Running   bool              `json:"running"`
+	Port      int               `json:"port"`
+	URLs      []string          `json:"urls"`      // every address the page answers on
+	Tailscale string            `json:"tailscale"` // the Tailscale address, if this PC has one
+	Err       string            `json:"err"`
+	HasPIN    bool              `json:"hasPin"`
 	Devices   []StoreDeviceView `json:"devices"` // PS5 apps paired with the PIN
 	PS5App    bool              `json:"ps5App"`  // this copy of Loadout carries the PS5 app
 	AutoApp   bool              `json:"autoApp"` // new builds of the PS5 app go to the PS5 by themselves
@@ -171,6 +171,8 @@ type remoteLane struct {
 }
 
 type remoteJob struct {
+	ID    int    `json:"id"`
+	Ctl   bool   `json:"ctl"` // it can be stopped, paused or moved on its own
 	Name  string `json:"name"`
 	Kind  string `json:"kind"`
 	State string `json:"state"`
@@ -235,7 +237,7 @@ func (a *App) remoteStateLocked() remoteState {
 	var bTotal, bDone, bPct, pTotal, pDone, pPct int
 	busyKeys := map[string]bool{}
 	for _, j := range a.build.Jobs {
-		rj := remoteJob{Name: j.Name, Kind: j.Kind, State: j.State, Pct: j.Pct, Note: j.Note}
+		rj := remoteJob{ID: j.ID, Ctl: controllable(j), Name: j.Name, Kind: j.Kind, State: j.State, Pct: j.Pct, Note: j.Note}
 		if j.Kind == "build" || j.Kind == "remove" {
 			bTotal++
 			switch {
@@ -511,6 +513,14 @@ func (a *App) remoteHandler(rs *remoteServer) http.Handler {
 			return nil, err
 		}
 		return map[string]string{"msg": msg}, nil
+	}))
+	mux.HandleFunc("/r/job", post(func(r *http.Request) (any, error) {
+		var b struct {
+			ID     int    `json:"id"`
+			Action string `json:"action"`
+		}
+		json.NewDecoder(r.Body).Decode(&b)
+		return nil, a.jobAction(b.ID, b.Action)
 	}))
 	mux.HandleFunc("/r/stop", post(func(r *http.Request) (any, error) {
 		var b struct{ Lane string }
