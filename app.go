@@ -2504,7 +2504,13 @@ func (a *App) sendImage(j *BuildJob, img string) (string, error) {
 			a.mu.Unlock()
 		}
 		note("Getting PS5Upload ready on the PS5")
-		started, perr := p5uSend(host, img, path.Join(dir, filepath.Base(img)), progress, func(b string) {
+		moved := false // a byte went: a failure after this isn't one to quietly redo over FTP
+		started, perr := p5uSend(host, img, path.Join(dir, filepath.Base(img)), func(sent, total int64) {
+			if sent > 0 {
+				moved = true
+			}
+			progress(sent, total)
+		}, func(b string) {
 			switch b {
 			case "source":
 				p5uWhy = 1
@@ -2515,6 +2521,15 @@ func (a *App) sendImage(j *BuildJob, img string) (string, error) {
 			}
 		}, cancelled)
 		switch {
+		case started && perr != nil && !moved && !errors.Is(perr, errFTPCancelled):
+			// it started but never sent anything (the console gave up waiting):
+			// nothing was written, so FTP takes over, and PS5Upload's leftover goes
+			fellBack = perr.Error()
+			note("PS5Upload sent nothing, so this goes over FTP")
+			if g, err := ftpDial(host, port); err == nil {
+				g.cmd("DELE %s", path.Join(dir, filepath.Base(img))+".ava-part")
+				g.Close()
+			}
 		case started && perr != nil:
 			return "", perr
 		case started:
