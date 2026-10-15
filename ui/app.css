@@ -753,7 +753,7 @@ body[data-side="ps5"] .folderbar #pickFolder, body[data-side="ps5"] .folderbar #
   --ink: #050608; --ink-2: #0B0D12; --surface: #14171E; --raised: #1F232D;
   --line: #2A2F3B; --line-soft: #1A1E26;
   --text: #F3F5F8; --muted: #9BA3B2; --faint: #636B7B;
-  --r-s: 999px; --r-m: 16px;
+  --r-s: 8px; --r-m: 16px; /* small corners for boxes; buttons and fields set their own pill shape */
 }
 body { background: radial-gradient(1200px 500px at 70% -10%, #0E1A33 0%, transparent 60%), var(--ink); }
 /* the sections are a column down the left-hand side */
@@ -779,7 +779,7 @@ body { background: radial-gradient(1200px 500px at 70% -10%, #0E1A33 0%, transpa
 @media (max-width: 900px) { .shell { grid-template-columns: 64px minmax(0, 1fr); } .navbtn span, .navbtn em, .brand div, .tabs .navgroup { display: none; } }
 
 .folderbar { border-bottom: 0; padding: 14px 28px 4px; }
-.folder, .search { border-radius: 999px; }
+.folder, .search, .seg, .toast { border-radius: 999px; }
 .btn { border-radius: 999px; padding: 7px 16px; }
 .btn.primary { background: var(--text); color: #07080B; border-color: var(--text); }
 .btn.primary:hover { filter: none; box-shadow: 0 0 0 2px var(--accent); }
