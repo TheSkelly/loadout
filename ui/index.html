@@ -40,6 +40,7 @@
     <button class="navbtn" data-view="store">
       <svg viewBox="0 0 24 24"><path d="M4 8h16l-1.5 11a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>
       <span>Homebrew</span><em id="nav-store"></em></button>
+    <div class="navgroup">Tools</div>
     <button class="navbtn" data-view="payloads">
       <svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 19h16"/></svg>
       <span>Payloads</span></button>
@@ -62,13 +63,8 @@
 
   <main class="main">
     <header class="folderbar">
-      <button class="folder" id="pickFolder" title="Change games folder">
-        <svg viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg>
-        <span id="folderPath">Choose your games folder</span>
-      </button>
-      <button class="btn ghost" id="moreFolders" title="Read games from more than one folder">+ Folder</button>
-      <button class="btn ghost" id="rescan"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>Rescan</button>
       <div class="statcol"><div class="stats" id="stats"></div><div class="ps5row" id="ps5row"></div></div>
+      <button class="btn ghost" id="rescan"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></svg>Rescan</button>
     </header>
 
     <!-- LIBRARY -->
@@ -83,6 +79,7 @@
           <button data-layout="list" title="List"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
         </div>
       </div>
+      <section class="start" id="getStarted" hidden></section>
       <div class="scroll" id="libScroll"><section class="spot" id="spot" hidden></section><div id="grid" class="grid"></div></div>
     </section>
 
@@ -152,7 +149,14 @@
 
     <!-- BUILD -->
     <section class="view" id="view-build" hidden>
-      <div class="panel outrow">
+      <div class="sendas">
+        <span>Send games as</span>
+        <div class="seg2" role="group" aria-label="Send games as">
+          <button data-sendas="image">exFAT images</button><button data-sendas="folder">Game folders</button>
+        </div>
+        <small id="sendasNote"></small>
+      </div>
+      <div class="panel outrow imgonly">
         <label>Save images to</label>
         <button class="folder small" id="pickOut"><svg viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg><span id="outPath"></span></button>
         <button class="btn ghost" id="openOut">Open</button>
@@ -163,8 +167,8 @@
         <label class="switch full" id="nukeBigRow"><input type="checkbox" id="nukeBig"><span></span>Delete the folder for good instead of using the Recycle Bin
           <small>Nothing goes to the Recycle Bin and Windows never stops to ask, so builds keep going while you're away. Still only after the image passes the check. The folder can't be brought back</small></label>
       </div>
-      <div class="pcdrives" id="pcDrives"></div>
-      <p class="hint">Each game becomes one ready-to-mount .exfat image with the game files at its root. Names follow your Rename pattern and the volume label is the title ID. Nothing needs to be installed.</p>
+      <div class="pcdrives imgonly" id="pcDrives"></div>
+      <p class="hint imgonly">Each game becomes one ready-to-mount .exfat image with the game files at its root. Names follow your Rename pattern and the volume label is the title ID. Nothing needs to be installed.</p>
       <div class="listhead build">
         <label class="check"><input type="checkbox" id="bldAll"><span></span></label>
         <span>Game</span><span>Size</span><span>Image file</span>
@@ -315,32 +319,38 @@
           </div>
           <div class="set" data-tab="ps5">
             <h3>My PS5 firmware</h3>
-            <p>Games built for a newer firmware than yours, with no fakelib folder to backport them, get a coral "Needs backport" tag in the library.</p>
+            <p>Loadout reads which firmware each game's programs ask for. Games built for newer firmware than yours that aren't backported (or whose backport wasn't finished) get a coral tag in the library, with a button to backport them.</p>
             <input id="fw" placeholder="e.g. 9.60" inputmode="decimal" class="short">
+            <h3 style="margin-top:22px">Fakelib files for backports</h3>
+            <p>A game backported to older firmware needs a "fakelib" folder of newer system libraries. Most backported releases bring their own; for games that don't, Loadout copies the files from this folder. They can't come with Loadout, so they come from tools like BackPork.</p>
+            <div class="addrow"><input id="fakePath" readonly class="grow" placeholder="No folder picked" spellcheck="false"><button class="btn ghost" id="fakePick">Pick folder</button><button class="btn ghost" id="fakeClear">Clear</button></div>
           </div>
           <div class="set" data-tab="send">
             <h3>Where games go</h3>
+            <div class="drives" id="ps5drives"></div>
+            <details class="adv"><summary>Advanced: a folder of your own on the PS5</summary>
             <label class="block">Send images to this folder on the PS5
               <div class="addrow tight"><input id="ps5dir" spellcheck="false" class="grow"><button class="btn ghost" id="ps5browse">Browse PS5</button></div>
             </label>
             <div class="quick" id="ps5quick"></div>
-            <div class="drives" id="ps5drives"></div>
-            <label class="switch"><input type="checkbox" id="sendFolders"><span></span>Send game folders as they are, without building an exFAT image <small>for downloads you start from the Loadout app on the PS5. ShadowMountPlus runs folder games too. No image to build, but a game of many small files sends more slowly than one image. Any game can also be sent as a folder from its details on this PC</small></label>
+            </details>
             <label class="switch"><input type="checkbox" id="sendAfter"><span></span>Turn on "Send to PS5" for games I pick to build <small>you can still switch it off per game on the Build &amp; send screen</small></label>
           </div>
           <div class="set" data-tab="send">
             <h3>How games are sent</h3>
             <label class="switch"><input type="checkbox" id="useP5U"><span></span>Send games with PS5Upload <small>Loadout loads PS5Upload's helper on the PS5 and sends games through it. Every game is checked after it lands, and a cut-off send picks up where it stopped. If it can't start, Loadout sends over FTP instead. Turn this off to always use FTP</small></label>
             <h3>Speed</h3>
-            <label class="switch"><input type="checkbox" id="fastSend"><span></span>Fast send for FTP (experimental) <small>Only used when a game goes over FTP. Loadout loads its own small receiver on the PS5 and sends games through it. It has not beaten plain FTP on a real PS5 yet, so it is off unless you turn it on. Use "Test fast send" to compare the two on your setup</small></label>
             <div class="addrow">
               <label class="inline">Games sent at the same time<select id="sendAtOnce"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
             </div>
+            <details class="adv"><summary>Advanced: fast send for FTP (experimental)</summary>
+            <label class="switch"><input type="checkbox" id="fastSend"><span></span>Fast send for FTP (experimental) <small>Only used when a game goes over FTP. Loadout loads its own small receiver on the PS5 and sends games through it. It has not beaten plain FTP on a real PS5 yet, so it is off unless you turn it on. Use "Test fast send" to compare the two on your setup</small></label>
             <div class="addrow" id="fastOpts">
               <label class="inline">Connections per game<select id="sendStreams"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
               
             </div>
-            <div class="addrow"><button class="btn ghost" id="recvtest" title="Checks that the fast receiver loads on the PS5 and times it against plain FTP">Test fast send</button><button class="btn ghost" id="ps5clean" title="Deletes half-sent images (.part files) from the PS5 folder">Remove unfinished uploads</button></div>
+            <div class="addrow"><button class="btn ghost" id="recvtest" title="Checks that the fast receiver loads on the PS5 and times it against plain FTP">Test fast send</button></div>
+            </details>
             <div id="sendResult" class="result resultline"></div>
           </div>
           <div class="set" data-tab="phone" id="remoteset">
@@ -361,6 +371,14 @@
             <label class="block">Discord webhook link <small>in Discord: Server Settings › Integrations › Webhooks › New Webhook › Copy Webhook URL</small>
               <input id="alertDiscord" placeholder="https://discord.com/api/webhooks/…" spellcheck="false" autocomplete="off"></label>
             <div class="addrow"><button class="btn ghost" id="alertTest">Send a test alert</button><span id="alertResult" class="result"></span></div>
+          </div>
+          <div class="set" data-tab="library">
+            <h3>Games folders</h3>
+            <p>Loadout reads your games from these folders. Each game is a folder with its files, or an exFAT image in the "exFAT Images" folder inside.</p>
+            <div class="addrow">
+              <button class="folder" id="pickFolder" title="Change the main games folder"><svg viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg><span id="folderPath">Choose your games folder</span></button>
+              <button class="btn ghost" id="moreFolders" title="Read games from more than one folder">Add another folder</button>
+            </div>
           </div>
           <div class="set" data-tab="library">
             <h3>Library</h3>

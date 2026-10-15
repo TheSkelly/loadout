@@ -50,6 +50,7 @@ type Settings struct {
 	RemoveAfter  bool              // move the game folder to the Recycle Bin after a verified build
 	NukeBig      bool              // a folder too big for the Recycle Bin is deleted for good without asking
 	RomFolder    string            `json:",omitempty"` // the ROM library the PS5 app downloads from
+	FakelibDir   string            `json:",omitempty"` // fakelib files copied into games backported without their own
 	EmuDirs      map[string]string `json:",omitempty"` // emulator folder name -> its games folder, for apps Loadout does not know
 	AutoDir      string            `json:",omitempty"` // the autoloader folder on the PS5, when it is not in a usual place
 	MoveDLC      *bool             // move loose DLC into its game's folder when renaming
@@ -93,30 +94,31 @@ func boolOr(b *bool, def bool) bool {
 }
 
 type BuildJob struct {
-	ID        int    `json:"id"` // for stopping, pausing or moving this one job
-	Key       string `json:"key"`
-	Kind      string `json:"kind"` // "build" or "remove"
-	Name      string `json:"name"`
-	Out       string `json:"out"`
-	State     string `json:"state"` // queued, building, done, failed, skipped, cancelled
-	Note      string `json:"note"`
-	Pct       int    `json:"pct"` // 0..1000
-	Size      int64  `json:"size"`
-	game      *Game
-	output    string
-	image     string // for remove jobs (and the PS5 path for ps5del jobs)
-	remoteDir bool   // ps5del: the PS5 copy is a folder
-	gen       int32  // PS5 lane stop counter when this job was queued
-	stop      int32  // set (atomically) to stop just this job
-	pause     bool   // ...and it's a pause: it can be resumed
-	only      string // a ZIP install that must be this one app folder (an update)
-	save      *PS5Save
-	contentID string             // pkginst: the package's content ID, needed for PS5 packages
-	sendAfter bool               // unpack: send the game folder to the PS5 once it's out
-	sendDrive string             // unpack: the PS5 drive for that send ("" for the default)
-	outDir    string             // build: where its image goes ("" for the main image folder)
-	sums      map[string]FileSum // checksums from this run's build, for the check
-	backup    *SaveBackup
+	ID            int    `json:"id"` // for stopping, pausing or moving this one job
+	Key           string `json:"key"`
+	Kind          string `json:"kind"` // "build" or "remove"
+	Name          string `json:"name"`
+	Out           string `json:"out"`
+	State         string `json:"state"` // queued, building, done, failed, skipped, cancelled
+	Note          string `json:"note"`
+	Pct           int    `json:"pct"` // 0..1000
+	Size          int64  `json:"size"`
+	game          *Game
+	output        string
+	image         string // for remove jobs (and the PS5 path for ps5del jobs)
+	remoteDir     bool   // ps5del: the PS5 copy is a folder
+	gen           int32  // PS5 lane stop counter when this job was queued
+	stop          int32  // set (atomically) to stop just this job
+	pause         bool   // ...and it's a pause: it can be resumed
+	only          string // a ZIP install that must be this one app folder (an update)
+	save          *PS5Save
+	contentID     string             // pkginst: the package's content ID, needed for PS5 packages
+	sendAfter     bool               // unpack, backport: send the game folder to the PS5 once it's ready
+	backportAfter bool               // unpack: backport the folder once it's out
+	sendDrive     string             // unpack: the PS5 drive for that send ("" for the default)
+	outDir        string             // build: where its image goes ("" for the main image folder)
+	sums          map[string]FileSum // checksums from this run's build, for the check
+	backup        *SaveBackup
 
 	// sending a built image to the PS5 runs alongside the next build
 	Send      bool   `json:"send"`
@@ -319,6 +321,8 @@ type Item struct {
 	ReqFW     string `json:"reqFw"`
 	NeedsFW   bool   `json:"needsFw"`
 	Backport  bool   `json:"backport"`
+	BPState   string `json:"bpState"` // needs, incomplete, ok or ""
+	BPNote    string `json:"bpNote"`
 	Category  string `json:"category"`
 	ContentID string `json:"contentId"`
 	Size      int64  `json:"size"`
@@ -804,19 +808,36 @@ func (a *App) stateLocked() State {
 			}
 		}
 	}
-	// backports: a fakelib folder in the game or in its image counts, and only
-	// a game built with a newer SDK than the console's firmware needs one
-	setImageLookDirs(a.imageDirsLocked())
+	// backports: what each game's programs ask for, read from its image or
+	// folder in the background, against the console's firmware
+	var folders []string
+	roots := map[string]string{}
 	for i := range st.Items {
 		it := &st.Items[i]
-		if it.Image != "" && !it.Backport && imageBackported(it.Image) {
-			it.Backport = true
+		if g := a.gameByKey(it.Key); g != nil && !g.IsFile && g.Meta.Root != "" && it.Platform == "PS5" {
+			roots[it.Key] = g.Meta.Root
+			folders = append(folders, g.Meta.Root)
 		}
-		if e := a.lib.Games[it.LibKey]; e != nil && it.LibKey != "" {
-			it.NeedsFW = needsBackport(e, a.cfg.ConsoleFW, it.Backport)
-		} else {
-			it.NeedsFW = false
+	}
+	setImageLookDirs(a.imageDirsLocked(), folders)
+	for i := range st.Items {
+		it := &st.Items[i]
+		it.NeedsFW, it.Backport, it.BPState, it.BPNote = false, false, "", ""
+		if it.Platform != "PS5" || it.IsDLC {
+			continue
 		}
+		// the folder is what gets built and sent; the image when there's no folder
+		var l gameLook
+		known := false
+		if r := roots[it.Key]; r != "" {
+			l, known = gameLookFor(r)
+		}
+		if !known && it.Image != "" {
+			l, known = gameLookFor(it.Image)
+		}
+		it.BPState, it.BPNote = backportState(l, known, it.SDK, a.cfg.ConsoleFW)
+		it.NeedsFW = it.BPState == "needs" || it.BPState == "incomplete"
+		it.Backport = it.BPState == "ok"
 	}
 	if st.Items == nil {
 		st.Items = []Item{}
@@ -1399,6 +1420,27 @@ func (a *App) runBuild(jobs []*BuildJob, out string, overwrite, removeAfter bool
 		a.mu.Unlock()
 		if cancelled() {
 			set(j, "cancelled", "")
+			continue
+		}
+		if j.Kind == "backport" {
+			set(j, "building", "Reading the game's programs")
+			note, err := a.runBackport(j, j.image, cancelled)
+			if err == nil && j.sendAfter {
+				a.mu.Lock()
+				a.queueFolderSendLocked(j, j.image)
+				a.mu.Unlock()
+				note += ". Sending the folder to the PS5"
+			}
+			switch {
+			case errors.Is(err, ErrCancelled):
+				set(j, "cancelled", "")
+			case err != nil:
+				set(j, "failed", err.Error())
+				failed++
+			default:
+				set(j, "done", note)
+				ok++
+			}
 			continue
 		}
 		if j.Kind == "unpack" {
@@ -2118,6 +2160,30 @@ func (a *App) handler() http.Handler {
 		var b struct{ Paths []string }
 		body(r, &b)
 		return a.cleanupDelete(b.Paths)
+	})
+	api("/api/backport", func(r *http.Request) (any, error) {
+		var b struct {
+			Items []backportItem
+			Send  bool
+			Drive string
+		}
+		body(r, &b)
+		return nil, a.startBackport(b.Items, b.Send, b.Drive)
+	})
+	// the folder of fakelib files copied into games backported without their own
+	api("/api/backport/fakelib", func(r *http.Request) (any, error) {
+		var b struct{ Path string }
+		body(r, &b)
+		if b.Path != "" {
+			if st, err := os.Stat(b.Path); err != nil || !st.IsDir() {
+				return nil, errors.New("That folder isn't there.")
+			}
+		}
+		a.mu.Lock()
+		a.cfg.FakelibDir = b.Path
+		saveJSON("settings.json", a.cfg)
+		a.mu.Unlock()
+		return nil, nil
 	})
 	api("/api/unpack", func(r *http.Request) (any, error) {
 		var b struct {

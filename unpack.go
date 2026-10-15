@@ -98,13 +98,20 @@ func (a *App) runUnpack(j *BuildJob, cancelled func() bool) (string, error) {
 		return "", fmt.Errorf("couldn't name the folder: %v", err)
 	}
 	note := fmt.Sprintf("Turned into a folder in %s, in %s. The image is kept", j.outDir, fmtDur(time.Since(start)))
+	if j.backportAfter {
+		bn, err := a.runBackport(j, final, cancelled)
+		if err != nil {
+			if errors.Is(err, ErrCancelled) {
+				return "", err
+			}
+			return "", fmt.Errorf("turned into a folder (%s), but the backport didn't work: %v", final, err)
+		}
+		note = "Turned into a folder. " + bn
+	}
 	if j.sendAfter {
 		// a folder game loads faster on the PS5 than an image: send it there now
 		a.mu.Lock()
-		sj := &BuildJob{Key: "folder:" + final, Kind: "sendfolder", Name: j.Name, Out: j.Out, State: "queued", Size: j.Size, image: final}
-		sj.Dest, sj.DestLabel = a.destLocked(j.sendDrive)
-		a.addJobsLocked([]*BuildJob{sj})
-		a.enqueuePS5Locked(sj)
+		a.queueFolderSendLocked(j, final)
 		a.mu.Unlock()
 		note += ". Sending the folder to the PS5"
 	}

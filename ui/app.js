@@ -229,6 +229,7 @@ const FILTERS = [
 ];
 
 function renderLibrary() {
+  renderStart();
   const all = games();
   $("#filters").innerHTML = FILTERS.map(([k, label, fn]) => {
     const n = all.filter(fn).length;
@@ -267,9 +268,10 @@ function tagsHTML(it, forDrawer) {
   if (it.isPkg) t.push(`<span class="tag sky" title="A PS4 game package (.pkg). It installs on the PS5 as it is, so there's no image to build.">PS4 PKG</span>`);
   if (it.image) t.push(`<span class="tag mint" title="${esc(it.exfatOnly ? "Converted. The game folder is gone, it lives in this exFAT image now." : "Converted to an exFAT image")}">exFAT</span>`);
   else if (!it.present) t.push(`<span class="tag dim">Missing</span>`);
-  if (it.needsFw) t.push(`<span class="tag coral" title="Built with SDK ${esc(it.sdk)}, newer than your firmware ${esc(S.settings.ConsoleFW)}, and it has no fakelib folder. It won't run until it's backported.">Needs backport</span>`);
+  if (it.bpState === "incomplete") t.push(`<span class="tag coral" title="${esc(it.bpNote)}">Backport incomplete</span>`);
+  else if (it.needsFw) t.push(`<span class="tag coral" title="${esc(it.bpNote)}">Needs backport</span>`);
   else if (forDrawer && it.reqFw) t.push(`<span class="tag dim">FW ${esc(it.reqFw)}</span>`);
-  if (it.backport) t.push(`<span class="tag gold" title="Backported: it carries a fakelib folder (in its folder or its image), so it runs on firmware older than it was built for. Loadout only labels it.">Backported</span>`);
+  if (it.backport) t.push(`<span class="tag gold" title="${esc(it.bpNote)}">Backported</span>`);
   if (it.wrap && !it.done) t.push(`<span class="tag sky">Loose files</span>`);
   if (dlcCount(it)) t.push(`<span class="tag lilac">DLC ${dlcCount(it)}</span>`);
   if (it.onPs5) t.push(`<span class="tag sky" title="${esc(ps5Copies(it))}">On PS5</span>`);
@@ -322,7 +324,7 @@ function renderDrawer() {
     ["Title ID", `<span class="id">${esc(it.titleId || "Unknown")}</span>`],
     ["Version", esc(it.version || "Unknown")],
     ["Asks for firmware", esc(it.reqFw || "Unknown")],
-    ["Built with SDK", esc(it.sdk || "Unknown") + (it.needsFw ? ` <span style="color:var(--coral)">(newer than your ${esc(S.settings.ConsoleFW)}, and not backported)</span>` : it.backport ? " (backported)" : "")],
+    ["Built with SDK", esc(it.sdk || "Unknown") + (it.backport ? " (backported)" : "")],
     ["Platform", esc(it.platform || "Unknown")],
     ["Content ID", esc(it.contentId || "Unknown")],
     ["Size", it.sized ? esc(size(it.size)) : "Calculating…"],
@@ -335,15 +337,18 @@ function renderDrawer() {
   const src = `/cover?k=${encodeURIComponent(it.coverKey || it.libKey)}`;
   const heroArt = it.hero ? `<img class="art" alt="" src="${artURL(it, "hero")}">` : it.cover ? `<img class="bg" alt="" src="${src}">` : "";
   $("#drawerBody").innerHTML = `<div class="hero${it.hero ? " wide" : ""}">${heroArt}${it.cover ? `<img class="fg" alt="" src="${src}">` : `<div class="initials">${esc(initials(it.name))}</div>`}</div>
-    <div class="body"><h2>${esc(it.name || it.current)}</h2>${storeHTML(it)}<div class="tagrow">${tagsHTML(it, true)}</div>
+    <div class="body"><h2>${esc(it.name || it.current)}</h2>
+    ${it.needsFw ? `<section class="bpbox"><b>${it.bpState === "incomplete" ? "This backport wasn't finished" : "This game needs a backport"}</b><p>${esc(it.bpNote)}</p>
+      <button class="btn primary" data-act="backport" data-k="${esc(it.key)}" data-img="${esc(it.image || "")}">Backport it</button></section>` : ""}
+    ${storeHTML(it)}<div class="tagrow">${tagsHTML(it, true)}</div>
     <dl class="facts">${f.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("")}</dl>
     ${dlcCount(it) ? `<section class="dlcsec"><h3>DLC <span>${dlcCount(it)}</span></h3>${dlcListHTML(it)}</section>` : ""}
-    ${it.present ? `<div class="btns">${buildBtnHTML(it, "")}${it.isPkg ? "" : `<button class="btn ghost" data-act="folder" data-k="${esc(it.key)}">${ICON.folder}Open folder</button>`}
+    ${it.present || it.image ? `<div class="btns">${it.present ? buildBtnHTML(it, "") : ""}${it.isPkg || !it.present ? "" : `<button class="btn ghost" data-act="folder" data-k="${esc(it.key)}">${ICON.folder}Open folder</button>`}
       ${it.image ? `<button class="btn ghost" data-act="showimg" data-k="${esc(it.key)}">${ICON.check}Show image</button>` : ""}
       ${it.image && !busy(it) ? `<button class="btn ghost" data-act="unpack" data-img="${esc(it.image)}" title="Copies the image's files back out into a game folder, next to your other games. The image is kept">${ICON.folder}Turn into folder</button>` : ""}
       ${S.settings.PS5IP && it.canBuild && !busy(it) ? `<button class="btn ghost" data-act="sendfolder" data-k="${esc(it.key)}" title="Sends the game's folder as it is, with no exFAT image. ShadowMountPlus runs folder games too">${ICON.send}Send folder to PS5</button>` : ""}
-      <button class="btn ghost" data-act="rename1" data-k="${esc(it.key)}">Fix name</button>
-      ${it.image && !busy(it) && !(it.dlc || []).length ? `<button class="btn ghost danger" data-act="remove1" data-k="${esc(it.key)}">${ICON.trash}Remove game folder</button>` : ""}
+      ${it.present ? `<button class="btn ghost" data-act="rename1" data-k="${esc(it.key)}">Fix name</button>` : ""}
+      ${it.present && it.image && !busy(it) && !(it.dlc || []).length ? `<button class="btn ghost danger" data-act="remove1" data-k="${esc(it.key)}">${ICON.trash}Remove game folder</button>` : ""}
       ${it.titleId ? `<button class="btn ghost" data-act="copyid" data-id="${esc(it.titleId)}">Copy title ID</button>` : ""}</div>` : ""}
     </div>`;
 }
@@ -438,6 +443,12 @@ const pickable = i => i.canBuild || !!i.image;
 const ps5Where = i => { const d = [...new Set((i.onPs5List || []).map(c => c.drive))]; return d.length ? ` (${d.join(", ")})` : ""; };
 let showDone = false;
 function renderBuild() {
+  const fm = !!S.settings.SendFolders;
+  $("#view-build").classList.toggle("foldermode", fm);
+  $$("[data-sendas]").forEach(b => b.setAttribute("aria-pressed", (b.dataset.sendas === "folder") === fm));
+  $("#sendasNote").textContent = fm
+    ? "Each game's folder goes to the PS5 as it is: nothing to build, and folder games start faster. Games that are only an exFAT image are turned back into a folder first."
+    : "Each game is built into one .exfat image first: one file to send, and it keeps the PS5's drive tidy.";
   $("#outPath").textContent = S.outDir || "Choose a folder";
   $("#freeOut").textContent = S.freeOut > 0 ? size(S.freeOut) + " free" : "";
   const allRows = games().filter(i => (i.present || i.exfatOnly) && !i.isPkg)
@@ -478,10 +489,11 @@ function renderBuild() {
   if (S.build.building) { db.disabled = false; db.textContent = "Stop building"; db.className = "btn danger solid"; db.dataset.mode = "stop"; }
   else { db.disabled = !buildN; db.textContent = buildN > 1 ? `Build ${buildN} images` : "Build selected"; db.className = "btn primary"; db.dataset.mode = ""; }
   $("#bldMissing").disabled = false;
-  const sendable = games().filter(i => bsel.has(i.key) && i.image).length;
+  const sendable = games().filter(i => bsel.has(i.key) && (fm ? (i.present && i.canBuild) || i.image : i.image)).length;
   const ds = $("#doSend");
+  db.hidden = fm;
   if (S.build.ps5Busy) { ds.disabled = false; ds.textContent = "Stop sending"; ds.className = "btn danger solid"; ds.dataset.mode = "stop"; }
-  else { ds.disabled = !sendable; ds.textContent = sendable > 1 ? `Send ${sendable} to PS5` : "Send selected to PS5"; ds.className = "btn ghost"; ds.dataset.mode = ""; }
+  else { ds.disabled = !sendable; ds.textContent = (sendable > 1 ? `Send ${sendable} ` : "Send selected ") + (fm ? (sendable > 1 ? "folders to PS5" : "as a folder") : "to PS5"); ds.className = fm ? "btn primary" : "btn ghost"; ds.dataset.mode = ""; }
   $("#removeAfter").checked = !!S.settings.RemoveAfter;
   $("#nukeBig").checked = !!S.settings.NukeBig; $("#nukeBigRow").hidden = !S.settings.RemoveAfter;
   if (document.activeElement && document.activeElement.matches("#bldList select")) return;
@@ -504,7 +516,7 @@ function renderBuild() {
         st = `<span class="line">${st}</span><span class="line send ${sc}">${sl}</span>`;
         cls += " two";
       }
-    } else if (i.exfatOnly) { cls = "ok"; st = `<span>exFAT image only${i.onPs5 ? ", on the PS5" + ps5Where(i) : ", ready to send"}</span>`; }
+    } else if (i.exfatOnly) { cls = "ok"; st = `<span>exFAT image only${i.onPs5 ? ", on the PS5" + ps5Where(i) : fm ? ", turned into a folder when sent" : ", ready to send"}</span>`; }
     else if (i.image) { cls = "ok"; st = `<span>Image built${i.onPs5 ? ", on the PS5" + ps5Where(i) : ""}</span>`; }
     else if (!i.canBuild) { cls = "bad"; st = `<span>${esc(i.buildNote)}</span>`; }
     else st = `<span>${esc(i.buildNote || "Ready")}</span>`;
@@ -1047,7 +1059,7 @@ let setTab = "ps5";
 function showSetTab(t) {
   setTab = t;
   $$("#setnav button").forEach(b => b.dataset.settab === t ? b.setAttribute("aria-current", "true") : b.removeAttribute("aria-current"));
-  $$("#view-settings .set").forEach(s => s.hidden = s.dataset.tab !== t);
+  $$("#view-settings .set").forEach(s => s.hidden = s.dataset.tab !== t || (s.id === "trayset" && S && !S.hasTray));
   const sc = $("#view-settings .scroll"); if (sc) sc.scrollTop = 0;
 }
 $("#setnav").onclick = e => { const b = e.target.closest("[data-settab]"); if (b) showSetTab(b.dataset.settab); };
@@ -1059,12 +1071,13 @@ function renderSettings() {
   $("#ps5quick").hidden = drives().length > 0;
   $("#ps5quick").innerHTML = PS5_QUICK.map(([p, l]) => `<button data-quick="${esc(p)}" aria-pressed="${S.settings.PS5Dir === p}">${esc(l)}<i>${esc(p)}</i></button>`).join("");
   $("#sendAfter").checked = !!S.settings.SendAfter;
-  $("#sendFolders").checked = !!S.settings.SendFolders;
   $("#useP5U").checked = !S.settings.PlainFTP;
   $("#fastSend").checked = !!S.settings.FastSend; $("#fastOpts").hidden = !S.settings.FastSend;
   if (document.activeElement !== $("#sendStreams")) $("#sendStreams").value = String(S.settings.SendStreams || 1);
   if (document.activeElement !== $("#sendAtOnce")) $("#sendAtOnce").value = String(S.settings.SendAtOnce || 2);
   renderPayloads();
+  $("#fakePath").value = S.settings.FakelibDir || "";
+  $("#fakeClear").hidden = !S.settings.FakelibDir;
   const fw = $("#fw");
   if (document.activeElement !== fw) fw.value = S.settings.ConsoleFW || "";
   $("#showMissing").checked = !!S.settings.ShowMissing;
@@ -1080,7 +1093,7 @@ function renderRemote() {
   for (const [id, v] of [["#remotePin", S.settings.RemotePIN || ""], ["#remotePort", String(r.port || 8787)], ["#alertNtfy", S.settings.AlertNtfy || ""], ["#alertDiscord", S.settings.AlertDiscord || ""]])
     if (document.activeElement !== $(id)) $(id).value = v;
   $("#closeToTray").checked = !!S.closeToTray; $("#keepAwake").checked = !!S.keepAwake; { const st = S.awakeState === "on" ? "Right now: keeping this PC and its screen awake for the running job." : S.awakeState === "partial" ? "Right now: Windows refused part of the keep-awake request, so it may still sleep. Restarting Loadout usually fixes this." : ""; $("#awakeNotes").innerHTML = (S.keepAwake ? [st, ...(S.awakeNotes || [])] : []).filter(Boolean).map(t => `<p>${esc(t)}</p>`).join(""); }
-  $("#trayset").hidden = !S.hasTray;
+  $("#trayset").hidden = !S.hasTray || setTab !== "app";
   { // the downloads folder
     const w = S.watch || {};
     $("#watchFolder").value = S.settings.WatchFolder || "";
@@ -1406,6 +1419,7 @@ document.addEventListener("click", async e => {
     case "ps5queue": return showQueue();
     case "unpack": return act("unpack", { Images: [b.dataset.img] }, "Turning the image into a game folder. Progress shows in the bar at the bottom.");
     case "unpackmany": return pickUnpack();
+    case "backport": return askBackport(b.dataset.k, b.dataset.img);
     case "sendfolder": return act("sendfolder", { Keys: [k], Drive: defDrive() }, "Sending the game folder to the PS5. Progress shows under Build & send.");
     case "build1": return buildKeys([k]);
     case "remove1": return removeFolder(it);
@@ -1648,7 +1662,6 @@ $("#fastSend").onchange = e => act("settings", { fastSend: e.target.checked });
 $("#useP5U").onchange = e => act("settings", { plainFTP: !e.target.checked });
 $("#sendStreams").onchange = e => act("settings", { sendStreams: +e.target.value });
 $("#sendAtOnce").onchange = e => act("settings", { sendAtOnce: +e.target.value });
-$("#sendFolders").onchange = e => act("settings", { sendFolders: e.target.checked });
 $("#sendAfter").onchange = e => {
   if (e.target.checked && !S.settings.PS5IP) { toast("Set your PS5's IP address first.", true); e.target.checked = false; return; }
   act("settings", { sendAfter: e.target.checked });
@@ -1672,14 +1685,6 @@ $("#ps5speed").onclick = async () => {
   } catch (e) { out.className = "result bad"; out.textContent = e.message; }
   $("#ps5speed").disabled = false;
 };
-$("#ps5clean").onclick = async () => {
-  const out = $("#sendResult"); out.className = "result"; out.textContent = "Checking the PS5…";
-  try {
-    const gone = await api("ps5/cleanup", {});
-    out.className = "result ok";
-    out.textContent = gone.length ? `Removed ${gone.length} unfinished upload${gone.length === 1 ? "" : "s"}: ${gone.join(", ")}` : "No unfinished uploads on the PS5.";
-  } catch (e) { out.className = "result bad"; out.textContent = e.message; }
-};
 $("#ps5test").onclick = async () => {
   const out = $("#ps5result"); out.className = "result"; out.textContent = "Connecting…";
   try {
@@ -1688,7 +1693,18 @@ $("#ps5test").onclick = async () => {
     out.textContent = r.missing ? `Connected. ${r.dir} doesn't exist yet, it'll be created on the first send.` : `Connected. ${r.dir} has ${r.entries.length} item${r.entries.length === 1 ? "" : "s"}.`;
   } catch (e) { out.className = "result bad"; out.textContent = e.message; }
 };
-$("#doSend").onclick = () => $("#doSend").dataset.mode === "stop" ? stopLane("ps5") : sendItems(games().filter(i => bsel.has(i.key)));
+$("#doSend").onclick = () => {
+  if ($("#doSend").dataset.mode === "stop") return stopLane("ps5");
+  const picked = games().filter(i => bsel.has(i.key));
+  if (!S.settings.SendFolders) return sendItems(picked);
+  // as game folders: folders go as they are, image-only games are unpacked first
+  const drive = batchDrive || defDrive();
+  const folders = picked.filter(i => i.present && i.canBuild).map(i => i.key);
+  const images = picked.filter(i => !(i.present && i.canBuild) && i.image).map(i => i.image);
+  if (folders.length) act("sendfolder", { Keys: folders, Drive: drive }, `Sending ${folders.length} game folder${folders.length === 1 ? "" : "s"} to the PS5.`);
+  if (images.length) act("unpack", { Images: images, Send: true, Drive: drive }, `Turning ${images.length} image${images.length === 1 ? "" : "s"} into folders, then sending them.`);
+};
+document.addEventListener("click", e => { const b = e.target.closest("[data-sendas]"); if (b) act("settings", { sendFolders: b.dataset.sendas === "folder" }); });
 $("#showMissing").onchange = e => act("settings", { showMissing: e.target.checked });
 $("#addIgnore").onsubmit = e => {
   e.preventDefault();
@@ -1915,11 +1931,6 @@ function renderConsole() {
       <div class="muted">Loadout ${esc(S.version)}${p.spaceFrom ? ` · free space from ${esc(p.spaceFrom)}` : ""}</div>
     </section>
     <section class="card">
-      <h3>Send games to<small>for new sends</small></h3>
-      ${drives().length ? drives().map(d => `<button class="choice" data-con="drive" data-root="${esc(d.root)}" aria-pressed="${d.root === defDrive()}"><span class="dot"></span><span><b>${esc(d.label || d.short)}</b><small>${d.free >= 0 ? size(d.free) + " free" : "free space unknown"}</small></span></button>`).join("")
-        : `<div class="muted">Loadout hasn't read the PS5's drives yet.</div>`}
-    </section>
-    <section class="card">
       <h3>Storage<small>${drives().length} drive${drives().length === 1 ? "" : "s"}</small></h3>
       ${drives().map(d => `<div><div class="crow"><b>${esc(d.label || d.short)}</b><span class="end">${d.free >= 0 ? size(d.free) + " free" : ""}</span></div>
         ${meter(d.total > 0 && d.free >= 0 ? (d.total - d.free) * 100 / d.total : 0)}<small class="muted">${d.total > 0 ? size(d.total) + " total" : ""}</small></div>`).join("")}
@@ -1945,7 +1956,6 @@ $("#consoleCards").addEventListener("click", async e => {
   switch (b.dataset.con) {
     case "refresh": api("ps5/drives", {}).then(() => poll(true)).catch(err => toast(err.message, true)); return;
     case "queue": return showQueue();
-    case "drive": return act("settings", { ps5Drive: b.dataset.root });
     case "scan":
       cleanBusy = true; renderConsole();
       try { CLEAN = await api("cleanup/scan", {}); } catch (err) { toast(err.message, true); }
@@ -2053,3 +2063,57 @@ async function pickUnpack() {
     `Turning ${picked.length} image${picked.length === 1 ? "" : "s"} into folder${picked.length === 1 ? "" : "s"}${send ? ", then sending them to the PS5" : ""}.`);
 }
 document.addEventListener("change", e => { if (e.target.id === "unAll") $$("#modalBody input[data-img]").forEach(x => x.checked = e.target.checked); });
+
+// backporting a game for this PS5's firmware, the way BackPork does
+async function askBackport(key, img) {
+  const it = S.items.find(i => i.key === key);
+  if (!it) return;
+  if (!S.settings.ConsoleFW) { toast("Set your PS5's firmware in Settings first.", true); showView("settings"); return; }
+  const fromImage = !it.present && img;
+  const ds = drives();
+  const noFake = it.bpState === "needs" && !S.settings.FakelibDir;
+  const r = await modal(`<h3>Backport ${esc(it.name || it.current)}</h3>
+    <p>${esc(it.bpNote)}</p>
+    <ol class="steps">
+      ${fromImage ? `<li>Its exFAT image is turned into a game folder next to your other games (the image is kept). That needs about ${esc(size(it.size || 0))} free.</li>` : ""}
+      <li>Each of its programs that asks for newer firmware is lowered to your ${esc(S.settings.ConsoleFW)} and signed again. The originals are kept, so it can be undone.</li>
+      <li>${it.bpState === "incomplete" ? "It already has its fakelib folder, which is kept." : S.settings.FakelibDir ? "The fakelib files from your fakelib folder are added." : "It has no fakelib folder. Many games need one; pick a folder of fakelib files in Settings (PS5) for those."}</li>
+    </ol>
+    ${noFake ? `<p class="warn">Without fakelib files this game may still not start.</p>` : ""}
+    ${S.settings.PS5IP ? `<label class="check"><input type="checkbox" id="bpSend" checked><span></span>Send the backported game folder to the PS5 when it's done</label>
+    ${ds.length > 1 ? `<label>To <select id="bpDrive">${ds.map(d => `<option value="${esc(d.root)}" ${d.root === defDrive() ? "selected" : ""}>${esc(d.label || d.short)}${d.free >= 0 ? " (" + size(d.free) + " free)" : ""}</option>`).join("")}</select></label>` : ""}
+    ${it.onPs5 ? `<p class="muted">The copy already on the PS5 is the one that won't start; delete it from the PS5 once the new one works.</p>` : ""}` : ""}
+    <p class="muted">Needs Python 3 on this PC, which signs the patched programs.</p>`,
+    [{ label: "Cancel" }, { label: "Backport it", cls: "primary" }]);
+  if (!r || r.i !== 1) return;
+  const send = !!($("#bpSend") && $("#bpSend").checked), drive = $("#bpDrive") ? $("#bpDrive").value : "";
+  act("backport", { Items: [{ Key: it.key, Image: img || "" }], Send: send, Drive: drive },
+    fromImage ? "Turning the image into a folder, then backporting it. Progress shows in the bar at the bottom." : "Backporting. Progress shows in the bar at the bottom.");
+}
+
+$("#fakePick").onclick = async () => {
+  const p = await api("pick", { title: "Pick the folder with the fakelib files", start: S.settings.FakelibDir || "" }).catch(e => toast(e.message, true));
+  if (p) act("backport/fakelib", { Path: p }, "Fakelib folder set.");
+};
+$("#fakeClear").onclick = () => act("backport/fakelib", { Path: "" }, "Fakelib folder cleared.");
+
+// getting started: what a new setup still needs, at the top of the library
+function renderStart() {
+  const el = $("#getStarted");
+  const steps = [
+    { done: !!S.settings.Folder, title: "Choose your games folder", text: "The folder your PS5 game dumps are in.", btn: "Choose folder", act: "start-folder" },
+    { done: !!S.settings.PS5IP, title: "Connect your PS5", text: "Its IP address, with an FTP server running on it (ftpsrv or etaHEN's).", btn: "Set up PS5", act: "start-ps5" },
+    { done: !!S.settings.ConsoleFW, title: "Tell Loadout your PS5's firmware", text: "So it can flag games that need a backport.", btn: "Set firmware", act: "start-ps5" },
+  ];
+  const left = steps.filter(x => !x.done);
+  el.hidden = !left.length;
+  if (!left.length) return;
+  el.innerHTML = `<h2>Welcome to Loadout</h2><p>A few things to set up, then your games show here. Build them into images (or keep them as folders) and send them to your PS5 from Build &amp; send.</p>
+    <ol>${steps.map(x => `<li class="${x.done ? "done" : ""}"><div><b>${esc(x.title)}</b><small>${esc(x.text)}</small></div>${x.done ? "<span>Done</span>" : `<button class="btn ${x === left[0] ? "primary" : "ghost"} sm" data-start="${x.act}">${esc(x.btn)}</button>`}</li>`).join("")}</ol>`;
+}
+$("#getStarted").addEventListener("click", e => {
+  const b = e.target.closest("[data-start]");
+  if (!b) return;
+  if (b.dataset.start === "start-folder") return pickGames();
+  showView("settings"); showSetTab("ps5");
+});

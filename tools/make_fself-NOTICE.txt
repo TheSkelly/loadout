@@ -1,0 +1,5 @@
+make_fself.py comes unchanged from the PS5 payload SDK:
+https://github.com/ps5-payload-dev/sdk/blob/master/samples/install_app/make_fself.py
+
+It is free software under the GNU General Public License, version 3 (make_fself-LICENSE.txt).
+Loadout runs it as a separate program to sign game programs it backports.

@@ -31,20 +31,26 @@ func TestImageHasFakelib(t *testing.T) {
 	}
 }
 
-func TestNeedsBackport(t *testing.T) {
+func TestBackportState(t *testing.T) {
 	for _, c := range []struct {
-		sdk, sysver string
-		backported  bool
-		want        bool
+		name  string
+		look  gameLook
+		known bool
+		sdk   string
+		want  string
 	}{
-		{"13.00", "13.60", false, true},  // built for newer firmware, nothing to make up for it
-		{"13.00", "13.60", true, false},  // has its fakelibs
-		{"12.00", "13.60", false, false}, // asks for 13.60, but built for this firmware: it runs
-		{"11.00", "12.70", false, false},
+		{"built for newer firmware, not backported", gameLook{SDK: 0x13000038}, true, "13.00", "needs"},
+		{"NHL 27: fakelib, but its programs still ask for 13.00", gameLook{SDK: 0x13000038, Fakelib: true}, true, "13.00", "incomplete"},
+		{"Wolverine: programs lowered, fakelib", gameLook{SDK: 0x04000038, Fakelib: true}, true, "13.00", "ok"},
+		{"built for this firmware", gameLook{SDK: 0x11000040}, true, "11.00", ""},
+		{"not read yet, param.json says newer", gameLook{}, false, "13.00", ""},
+		{"not read yet, param.json says older", gameLook{}, false, "11.00", ""},
 	} {
-		e := &LibEntry{Platform: "PS5", SDK: c.sdk, SysVer: c.sysver}
-		if got := needsBackport(e, "12.00", c.backported); got != c.want {
-			t.Errorf("SDK %s, asks %s, backported %v: needs backport = %v, want %v", c.sdk, c.sysver, c.backported, got, c.want)
+		if got, _ := backportState(c.look, c.known, c.sdk, "12.00"); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
 		}
+	}
+	if got, _ := backportState(gameLook{SDK: 0x13000038}, true, "13.00", ""); got != "" {
+		t.Errorf("no firmware set: %q", got)
 	}
 }
