@@ -18,11 +18,14 @@ import (
 // is kept. Runs in the build lane, one image at a time.
 
 // startUnpack queues images to turn into game folders.
-func (a *App) startUnpack(images []string) error {
+func (a *App) startUnpack(images []string, send bool, drive string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.build.Building {
 		return errors.New("Wait for the build to finish first.")
+	}
+	if send && strings.TrimSpace(a.cfg.PS5IP) == "" {
+		return errors.New("Set your PS5's IP address in Settings first.")
 	}
 	var jobs []*BuildJob
 	for _, img := range images {
@@ -32,7 +35,7 @@ func (a *App) startUnpack(images []string) error {
 		}
 		name := strings.TrimSuffix(filepath.Base(img), filepath.Ext(img))
 		jobs = append(jobs, &BuildJob{Key: "img:" + img, Kind: "unpack", Name: name, Out: name, State: "queued", Size: fi.Size(),
-			image: img, outDir: a.gamesFolderForImageLocked(img)})
+			image: img, outDir: a.gamesFolderForImageLocked(img), sendAfter: send, sendDrive: drive})
 	}
 	if len(jobs) == 0 {
 		return errors.New("There's no exFAT image there to turn into a folder.")
@@ -94,7 +97,18 @@ func (a *App) runUnpack(j *BuildJob, cancelled func() bool) (string, error) {
 		os.RemoveAll(tmp)
 		return "", fmt.Errorf("couldn't name the folder: %v", err)
 	}
-	return fmt.Sprintf("Turned into a folder in %s, in %s. The image is kept", j.outDir, fmtDur(time.Since(start))), nil
+	note := fmt.Sprintf("Turned into a folder in %s, in %s. The image is kept", j.outDir, fmtDur(time.Since(start)))
+	if j.sendAfter {
+		// a folder game loads faster on the PS5 than an image: send it there now
+		a.mu.Lock()
+		sj := &BuildJob{Key: "folder:" + final, Kind: "sendfolder", Name: j.Name, Out: j.Out, State: "queued", Size: j.Size, image: final}
+		sj.Dest, sj.DestLabel = a.destLocked(j.sendDrive)
+		a.addJobsLocked([]*BuildJob{sj})
+		a.enqueuePS5Locked(sj)
+		a.mu.Unlock()
+		note += ". Sending the folder to the PS5"
+	}
+	return note, nil
 }
 
 // unpackExfat copies every file in an exFAT image into dst, keeping its folders.

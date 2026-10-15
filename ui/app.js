@@ -996,10 +996,10 @@ function renderDock() {
   if (!b.running) { dock.hidden = true; return; }
   dock.hidden = false;
   const jobs = b.jobs, lanes = [];
-  const bjobs = jobs.filter(x => x.kind === "build" || x.kind === "remove");
+  const bjobs = jobs.filter(x => x.kind === "build" || x.kind === "remove" || x.kind === "unpack");
   if (bjobs.length) {
     const j = b.building ? (jobs[b.current] || {}) : {};
-    const verb = { verifying: "Checking the image for", removing: "Moving to the Recycle Bin:", queued: "Starting" }[j.state] || "Building";
+    const verb = j.kind === "unpack" ? "Turning into a folder:" : { verifying: "Checking the image for", removing: "Moving to the Recycle Bin:", queued: "Starting" }[j.state] || "Building";
     const n = bjobs.indexOf(j) + 1;
     lanes.push(`<div class="lane"><div class="what" title="${esc(b.file || "")}">${b.building ? `${verb} ${esc(j.name || "")}` : "All images built"}<small>${b.building ? `${n} of ${bjobs.length}${b.speed ? ", " + size(b.speed) + "/s" : ""}${b.eta ? ", " + dur(b.eta) + " left" : ""}` : ""}</small></div>
       <div class="track"><i style="width:${overallPct() / 10}%"></i></div>
@@ -1013,9 +1013,10 @@ function renderDock() {
     const cur = pjobs.find(x => live.includes(ps5State(x)));
     const liveN = pjobs.filter(x => ps5State(x) === "sending").length;
     const pct = pjobs.reduce((a, x) => a + (fin.includes(ps5State(x)) ? 1000 : live.includes(ps5State(x)) ? (x.kind === "build" ? x.sendPct : x.pct) : 0), 0) / pjobs.length;
-    const what = cur ? (ps5State(cur) === "copying" ? `Copying ${esc(cur.name)}` : ps5State(cur) === "saving" ? `Backing up the save for ${esc(cur.name)}` : ps5State(cur) === "restoring" ? `Restoring the save for ${esc(cur.name)}` : ps5State(cur) === "deleting" ? `Deleting ${esc(cur.name)} from the PS5` : ps5State(cur) === "moving" ? `Moving ${esc(cur.name)} (${esc(cur.out)})` : (liveN > 1 ? `Sending ${liveN} games to the PS5` : `Sending ${esc(cur.name)} to the PS5`)) : doneN === pjobs.length ? "PS5 jobs done" : "Waiting for the next PS5 job";
-    const sub = cur && ps5State(cur) === "deleting" ? esc(cur.note || "") : `${doneN} of ${pjobs.length} done${b.sendSpeed && cur ? ", " + size(b.sendSpeed) + "/s" : ""}${b.sendEta && cur ? ", " + dur(b.sendEta) + " left" : ""}${b.sendSlow && cur ? ", " + esc(b.sendSlow) : ""}`;
-    lanes.push(`<div class="lane"><div class="what">${what}<small>${sub}</small></div>
+    const what = cur ? (ps5State(cur) === "copying" ? `Copying ${esc(cur.name)}` : ps5State(cur) === "saving" ? `Backing up the save for ${esc(cur.name)}` : ps5State(cur) === "restoring" ? `Restoring the save for ${esc(cur.name)}` : ps5State(cur) === "deleting" ? `Deleting ${esc(cur.name)} from the PS5` : ps5State(cur) === "moving" ? `Moving ${esc(cur.name)} (${esc(cur.out)})` : (liveN > 1 ? `Sending ${pjobs.filter(x => ps5State(x) === "sending").map(x => esc(x.name)).join(", ")}` : `Sending ${esc(cur.name)} to the PS5`)) : doneN === pjobs.length ? "PS5 jobs done" : "Waiting for the next PS5 job";
+    const fileNow = cur && b.sendFile && b.sendFile !== cur.name ? `${esc(b.sendFile)} · ` : "";
+    const sub = cur && ps5State(cur) === "deleting" ? esc(cur.note || "") : `${fileNow}${doneN} of ${pjobs.length} done${b.sendSpeed && cur ? ", " + size(b.sendSpeed) + "/s" : ""}${b.sendEta && cur ? ", " + dur(b.sendEta) + " left" : ""}${b.sendSlow && cur ? ", " + esc(b.sendSlow) : ""}`;
+    lanes.push(`<div class="lane"><div class="what" title="${esc(what.replace(/<[^>]+>/g, ""))}">${what}<small>${sub}</small></div>
       <div class="track send"><i style="width:${pct / 10}%"></i></div>
       <span class="lanebtns">${pjobs.some(x => x.kind !== "build" && ["queued", "paused"].includes(x.state) || b.ps5Busy) ? `<button class="btn ghost sm" data-act="ps5queue" title="Stop, pause or reorder one job">Queue</button>` : ""}${b.ps5Busy ? `<button class="btn danger sm" data-act="stopps5" title="Stops everything going to the PS5">Stop all</button>` : ""}</span></div>`);
   }
@@ -1403,7 +1404,8 @@ document.addEventListener("click", async e => {
     case "showpkg": return act("open", { path: it.path, select: true });
     case "pkginstall": return act("pkg/install", { Key: k });
     case "ps5queue": return showQueue();
-    case "unpack": return act("unpack", { Images: [b.dataset.img] }, "Turning the image into a game folder. Progress shows under Build & send.");
+    case "unpack": return act("unpack", { Images: [b.dataset.img] }, "Turning the image into a game folder. Progress shows in the bar at the bottom.");
+    case "unpackmany": return pickUnpack();
     case "sendfolder": return act("sendfolder", { Keys: [k], Drive: defDrive() }, "Sending the game folder to the PS5. Progress shows under Build & send.");
     case "build1": return buildKeys([k]);
     case "remove1": return removeFolder(it);
@@ -2029,3 +2031,25 @@ setInterval(() => {
 }, 1500);
 // the Homebrew tab shows how many updates wait, so read the catalog once at the start
 setTimeout(() => { if (!BREW) brewLoad(false); }, 5000);
+
+// exFAT images back into game folders: folder games start faster on the PS5
+async function pickUnpack() {
+  const imgs = games().filter(i => i.image).sort((a, b) => (a.name || a.current).localeCompare(b.name || b.current));
+  if (!imgs.length) { toast("None of your games has an exFAT image."); return; }
+  const ds = drives();
+  const r = await modal(`<h3>Turn exFAT images into game folders</h3>
+    <p>Each image's files are copied out into a game folder next to your other games; the image is kept. Folder games load faster on the PS5 than images.</p>
+    <label class="check"><input type="checkbox" id="unAll"><span></span>Select all</label>
+    <ul class="ftplist unlist">${imgs.map(i => `<li><label class="check"><input type="checkbox" data-img="${esc(i.image)}"><span></span>${esc(i.name || i.current)}<small class="muted">${i.imageSize ? " " + size(i.imageSize) : ""}${i.onPs5 ? " · on the PS5" : ""}</small></label></li>`).join("")}</ul>
+    ${S.settings.PS5IP ? `<label class="check"><input type="checkbox" id="unSend" checked><span></span>Send each folder to the PS5 when it's ready</label>
+    ${ds.length > 1 ? `<label>To <select id="unDrive">${ds.map(d => `<option value="${esc(d.root)}" ${d.root === defDrive() ? "selected" : ""}>${esc(d.label || d.short)}${d.free >= 0 ? " (" + size(d.free) + " free)" : ""}</option>`).join("")}</select></label>` : ""}
+    <p class="muted">The image already on the PS5 stays there; delete it from the PS5 page once the folder works.</p>` : ""}`,
+    [{ label: "Cancel" }, { label: "Turn into folders", cls: "primary" }]);
+  if (!r || r.i !== 1) return;
+  const picked = $$("#modalBody input[data-img]:checked").map(x => x.dataset.img);
+  if (!picked.length) { toast("Pick at least one game.", true); return; }
+  const send = !!($("#unSend") && $("#unSend").checked), drive = $("#unDrive") ? $("#unDrive").value : "";
+  act("unpack", { Images: picked, Send: send, Drive: drive },
+    `Turning ${picked.length} image${picked.length === 1 ? "" : "s"} into folder${picked.length === 1 ? "" : "s"}${send ? ", then sending them to the PS5" : ""}.`);
+}
+document.addEventListener("change", e => { if (e.target.id === "unAll") $$("#modalBody input[data-img]").forEach(x => x.checked = e.target.checked); });

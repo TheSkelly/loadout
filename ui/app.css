@@ -494,7 +494,7 @@ button.pcchip:hover { background: var(--raised); }
 
 /* dock: one slim line per lane, with its own Stop at the end */
 .dock { grid-template-columns: 1fr; padding: 8px 24px; gap: 4px; }
-.dock .lane { display: grid; grid-template-columns: minmax(0, 1fr) minmax(140px, 32%) 64px; align-items: center; gap: 14px; }
+.dock .lane { display: grid; grid-template-columns: minmax(0, 1fr) minmax(140px, 32%) auto; align-items: center; gap: 14px; }
 .dock .lane + .lane { margin-top: 0; }
 .dock .lane .what { font-size: 13px; }
 .dock .lane .what small { font-size: 12px; }
@@ -756,30 +756,27 @@ body[data-side="ps5"] .folderbar #pickFolder, body[data-side="ps5"] .folderbar #
   --r-s: 999px; --r-m: 16px;
 }
 body { background: radial-gradient(1200px 500px at 70% -10%, #0E1A33 0%, transparent 60%), var(--ink); }
-.shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-.main { height: auto; min-height: 0; }
-.rail { flex-direction: row; align-items: center; gap: 18px; padding: 10px 28px; border-right: 0; border-bottom: 1px solid var(--line-soft); background: rgba(8, 9, 13, .85); }
-.brand { padding: 0; flex: none; }
+/* the sections are a column down the right-hand side */
+.shell { grid-template-columns: minmax(0, 1fr) 216px; grid-template-rows: 1fr; }
+.main { grid-column: 1; grid-row: 1; height: 100vh; min-height: 0; }
+.rail { grid-column: 2; grid-row: 1; flex-direction: column; align-items: stretch; gap: 4px; padding: 18px 14px; border-right: 0; border-left: 1px solid var(--line-soft); background: rgba(8, 9, 13, .9); height: 100vh; }
+.brand { padding: 2px 8px 18px; flex: none; }
 .brand b { font-size: 20px; }
-.tabs { flex: 1; display: flex; justify-content: flex-start; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.tabs { flex: 1; display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
-.tabs .navgroup { display: none; }
-/* centred when they fit; when they don't, they scroll from the first one instead of losing it */
-.tabs > button:first-of-type { margin-left: auto; }
-.tabs > button:last-of-type { margin-right: auto; }
-.navbtn { flex: none; gap: 6px; padding: 8px 15px; border-radius: 999px; font-size: 14.5px; color: var(--muted); }
-.navbtn svg { display: none; }
-.navbtn span { flex: none; }
+.tabs .navgroup { display: block; margin: 14px 12px 4px; }
+.tabs .navgroup:first-child { margin-top: 0; }
+.navbtn { flex: none; gap: 11px; padding: 9px 12px; border-radius: 999px; font-size: 14.5px; color: var(--muted); }
+.navbtn svg { display: block; }
+.navbtn span { flex: 1; }
 .navbtn em { font-size: 11px; }
 .navbtn:hover { background: var(--surface); }
-.navbtn[aria-current="page"] { background: var(--raised); color: var(--text); box-shadow: none; }
+.navbtn[aria-current="page"] { background: var(--raised); color: var(--text); box-shadow: inset 3px 0 0 var(--accent); }
 .navspace { display: none; }
-.navbtn.gear { width: 40px; height: 40px; padding: 0; justify-content: center; border: 1px solid var(--line); }
-.navbtn.gear svg { display: block; }
-.navbtn.gear span { display: none; }
-.rail-foot { margin: 0; padding: 0; max-width: 220px; }
+.navbtn.gear { margin-top: 8px; }
+.rail-foot { margin: 0; padding: 6px 12px 0; }
 .rail-foot:empty { display: none; }
-@media (max-width: 900px) { .shell { grid-template-columns: 1fr; } .navbtn span { display: inline; } .brand div { display: none; } }
+@media (max-width: 900px) { .shell { grid-template-columns: minmax(0, 1fr) 64px; } .navbtn span, .navbtn em, .brand div, .tabs .navgroup { display: none; } }
 
 .folderbar { border-bottom: 0; padding: 14px 28px 4px; }
 .folder, .search { border-radius: 999px; }
@@ -839,3 +836,6 @@ body { background: radial-gradient(1200px 500px at 70% -10%, #0E1A33 0%, transpa
 .appsheet h3 { margin: 0 0 4px; font: 600 24px var(--display); }
 .appsheet .safe { color: var(--mint); } .appsheet .leaves { color: var(--coral); }
 .notes { white-space: pre-wrap; max-height: 220px; overflow: auto; color: var(--muted); font-size: 13px; background: var(--raised); border-radius: 12px; padding: 10px 12px; }
+.unlist { max-height: 320px; overflow: auto; margin: 8px 0; }
+.unlist li { padding: 4px 0; }
+.unlist small { margin-left: 6px; }

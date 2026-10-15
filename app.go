@@ -112,6 +112,8 @@ type BuildJob struct {
 	only      string // a ZIP install that must be this one app folder (an update)
 	save      *PS5Save
 	contentID string             // pkginst: the package's content ID, needed for PS5 packages
+	sendAfter bool               // unpack: send the game folder to the PS5 once it's out
+	sendDrive string             // unpack: the PS5 drive for that send ("" for the default)
 	outDir    string             // build: where its image goes ("" for the main image folder)
 	sums      map[string]FileSum // checksums from this run's build, for the check
 	backup    *SaveBackup
@@ -2118,9 +2120,13 @@ func (a *App) handler() http.Handler {
 		return a.cleanupDelete(b.Paths)
 	})
 	api("/api/unpack", func(r *http.Request) (any, error) {
-		var b struct{ Images []string }
+		var b struct {
+			Images []string
+			Send   bool // send each folder to the PS5 afterwards
+			Drive  string
+		}
 		body(r, &b)
-		return nil, a.startUnpack(b.Images)
+		return nil, a.startUnpack(b.Images, b.Send, b.Drive)
 	})
 	api("/api/sendfolder", func(r *http.Request) (any, error) {
 		var b struct {
