@@ -38,19 +38,21 @@ func TestBackportState(t *testing.T) {
 		known bool
 		sdk   string
 		want  string
+		req   string
 	}{
-		{"built for newer firmware, not backported", gameLook{SDK: 0x13000038}, true, "13.00", "needs"},
-		{"NHL 27: fakelib, but its programs still ask for 13.00", gameLook{SDK: 0x13000038, Fakelib: true}, true, "13.00", "incomplete"},
-		{"Wolverine: programs lowered, fakelib", gameLook{SDK: 0x04000038, Fakelib: true}, true, "13.00", "ok"},
-		{"built for this firmware", gameLook{SDK: 0x11000040}, true, "11.00", ""},
-		{"not read yet, param.json says newer", gameLook{}, false, "13.00", ""},
-		{"not read yet, param.json says older", gameLook{}, false, "11.00", ""},
+		{"built for 3.00, param.json asks for 13.60 (the jailbreak gets past that)", gameLook{SDK: 0x03000040}, true, "3.00", "", "13.60"}, // the jailbreak gets past what param.json asks for
+		{"built for newer firmware, not backported", gameLook{SDK: 0x13000038}, true, "13.00", "needs", ""},
+		{"NHL 27: fakelib, but its programs still ask for 13.00", gameLook{SDK: 0x13000038, Fakelib: true}, true, "13.00", "incomplete", ""},
+		{"Wolverine: programs lowered, fakelib", gameLook{SDK: 0x04000038, Fakelib: true}, true, "13.00", "ok", ""},
+		{"built for this firmware", gameLook{SDK: 0x11000040}, true, "11.00", "", ""},
+		{"not read yet, param.json says newer", gameLook{}, false, "13.00", "", ""},
+		{"not read yet, param.json says older", gameLook{}, false, "11.00", "", ""},
 	} {
-		if got, _ := backportState(c.look, c.known, c.sdk, "12.00"); got != c.want {
+		if got, _ := backportState(c.look, c.known, c.sdk, c.req, "12.00"); got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)
 		}
 	}
-	if got, _ := backportState(gameLook{SDK: 0x13000038}, true, "13.00", ""); got != "" {
+	if got, _ := backportState(gameLook{SDK: 0x13000038}, true, "13.00", "", ""); got != "" {
 		t.Errorf("no firmware set: %q", got)
 	}
 }

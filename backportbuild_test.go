@@ -152,3 +152,23 @@ func mustRead(t *testing.T, p string) []byte {
 	}
 	return b
 }
+
+func TestLowerParamFirmware(t *testing.T) {
+	in := []byte("{\n  \"titleId\": \"PPSA03912\",\n  \"requiredSystemSoftwareVersion\": \"0x1360000000000000\",\n  \"sdkVersion\": \"0x0300000000000000\"\n}")
+	if fw := paramFirmware(in); fw != "13.60" {
+		t.Fatalf("read %q", fw)
+	}
+	out, old, changed := lowerParamFirmware(in, "12.00")
+	if !changed || old != "13.60" || paramFirmware(out) != "12.00" {
+		t.Fatalf("%v %q %s", changed, old, out)
+	}
+	if string(out) != strings.Replace(string(in), "0x1360000000000000", "0x1200000000000000", 1) {
+		t.Fatalf("changed more than the field:\n%s", out)
+	}
+	if _, _, changed := lowerParamFirmware(out, "12.00"); changed {
+		t.Fatal("lowered twice")
+	}
+	if paramFirmware([]byte(`{"requiredSystemSoftwareVersion": "0x0300000000000000"}`)) != "3.00" {
+		t.Fatal("3.00")
+	}
+}

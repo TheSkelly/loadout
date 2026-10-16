@@ -164,7 +164,7 @@ func setImageLookDirs(dirs, folders []string) {
 // firmware, not backported), "incomplete" (a fakelib folder, but its programs
 // still ask for newer firmware: it won't start), "ok" (backported and checked),
 // or "" (nothing to do, or not known yet).
-func backportState(l gameLook, known bool, sdk, console string) (state, note string) {
+func backportState(l gameLook, known bool, sdk, reqFW, console string) (state, note string) {
 	fw := sdkOfFirmware(console)
 	if console == "" || fw == 0 {
 		return "", ""

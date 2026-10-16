@@ -51,6 +51,7 @@ h2 { font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: v
 .game .info small { color: var(--muted); font-size: 12.5px; }
 .tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; margin-right: 4px; background: rgba(91,200,160,.16); color: var(--mint); }
 .tag.ps5 { background: rgba(143,216,255,.16); color: var(--sky); }
+.tag.bp { background: rgba(239,111,108,.16); color: var(--coral, #EF6F6C); }
 .go { padding: 9px 14px; border-radius: 10px; background: var(--accent); color: #04121F; font-weight: 700; font-size: 13.5px; flex: none; }
 .go[disabled] { opacity: .45; }
 .sheet { position: fixed; inset: 0; z-index: 20; background: rgba(5,8,14,.72); display: flex; align-items: flex-end; }
@@ -240,7 +241,7 @@ function render() {
   $("#games").innerHTML = list.length ? list.map(g => `<div class="card game ${sel.has(g.key) ? "sel" : ""}" data-pick="${esc(g.key)}">
       <span class="tick">${sel.has(g.key) ? "✓" : ""}</span>
       ${g.cover ? `<img alt="" loading="lazy" src="/r/cover?k=${encodeURIComponent(g.cover)}" onerror="this.outerHTML='<div class=ph></div>'">` : `<div class="ph"></div>`}
-      <div class="info"><b>${esc(g.name)}</b><small>${g.hasImage ? `<span class="tag">exFAT</span>` : ""}${g.onPs5 ? `<span class="tag ps5">On PS5</span>` : ""}${esc(size(g.size))}</small></div>
+      <div class="info"><b>${esc(g.name)}</b><small>${g.hasImage ? `<span class="tag">exFAT</span>` : ""}${g.onPs5 ? `<span class="tag ps5">On PS5</span>` : ""}${g.bpState === "needs" || g.bpState === "incomplete" ? `<span class="tag bp">${g.bpState === "incomplete" ? "Backport incomplete" : "Needs backport"}</span>` : ""}${esc(size(g.size))}</small></div>
       <button class="go" data-game="${esc(g.key)}" ${g.busy ? "disabled" : ""}>${g.busy ? "Working" : "Start"}</button></div>`).join("")
     : `<div class="empty">${S.games.length ? "Nothing matches." : "No games in the library yet."}</div>`;
   renderBar();
@@ -262,7 +263,8 @@ function openSheet(key) {
     ${g.canBuild && !g.hasImage ? `<button class="opt" data-do="build" ${S.build.busy ? "disabled" : ""}>Build image<small>${S.build.busy ? "A build is already running" : "Makes the exFAT image on your PC"}</small></button>` : ""}
     ${g.canBuild && !g.hasImage && canPs5 ? `<button class="opt" data-do="buildsend" ${S.build.busy ? "disabled" : ""}>Build, then send to PS5<small>Sends as soon as the image is ready</small></button>` : ""}
     ${g.hasImage && canPs5 ? `<button class="opt" data-do="send">Send to PS5<small>${S.ps5Online ? "Uploads the image you already built" : "The PS5 looks offline, but you can still try"}</small></button>` : ""}
-    ${!g.canBuild && !g.hasImage ? `<p>Nothing can be started for this game from here.</p>` : ""}
+    ${canPs5 && (g.ps5Folders || []).length ? `<button class="opt" data-do="ps5bp">Backport on the PS5<small>${g.bpState === "needs" || g.bpState === "incomplete" ? esc(g.bpNote) : "Its programs already ask for your firmware or older; this lowers what its param.json asks for and adds fakelib files from Settings."} Close the game on the PS5 first.</small></button>` : ""}
+    ${!g.canBuild && !g.hasImage && !(g.ps5Folders || []).length ? `<p>Nothing can be started for this game from here.</p>` : ""}
     <button class="cancel" data-do="close">Cancel</button>`;
   $("#sheet").hidden = false;
 }
@@ -320,6 +322,11 @@ document.addEventListener("click", async e => {
     const what = d.dataset.do;
     $("#sheet").hidden = true;
     if (what === "close") return;
+    if (what === "ps5bp") {
+      const g = S.games.find(x => x.key === sheetKey);
+      try { await call("/r/ps5backport", { Path: g.ps5Folders[0] }); toast("Backporting it on the PS5."); poll(); } catch (err) { toast(err.message, true); }
+      return;
+    }
     try { await start(what, [sheetKey]); toast("Started."); poll(); } catch (err) { toast(err.message, true); }
     return;
   }

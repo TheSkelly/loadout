@@ -110,28 +110,31 @@ func (a *App) forgetStoreDeviceLocked(id string) {
 // ---------- what the store shows ----------
 
 type storeGame struct {
-	Key       string     `json:"key"`
-	Name      string     `json:"name"`
-	ID        string     `json:"id"`
-	Platform  string     `json:"platform"`
-	Version   string     `json:"version"`
-	Size      int64      `json:"size"`
-	Publisher string     `json:"publisher"`
-	Release   string     `json:"release"`
-	Genres    []string   `json:"genres"`
-	Desc      string     `json:"desc"`
-	Rating    float64    `json:"rating"`
-	Ratings   int        `json:"ratings"`
-	Rated     string     `json:"rated"`
-	Cover     string     `json:"cover"` // art key for /s/art, "" when there is none
-	Hero      string     `json:"hero"`
-	Shots     int        `json:"shots"` // screenshots, at /s/art?k=<lib>&f=shot<n>
-	Lib       string     `json:"lib"`
-	DLC       []storeDLC `json:"dlc"`
-	Ready     bool       `json:"ready"`  // an image is built, so it can be sent right away
-	CanGet    bool       `json:"canGet"` // it can be built (if needed) and sent
-	OnPS5     string     `json:"onPs5"`  // where it already is on the PS5, if anywhere
-	FirstSeen string     `json:"firstSeen"`
+	Key        string     `json:"key"`
+	Name       string     `json:"name"`
+	ID         string     `json:"id"`
+	Platform   string     `json:"platform"`
+	Version    string     `json:"version"`
+	Size       int64      `json:"size"`
+	Publisher  string     `json:"publisher"`
+	Release    string     `json:"release"`
+	Genres     []string   `json:"genres"`
+	Desc       string     `json:"desc"`
+	Rating     float64    `json:"rating"`
+	Ratings    int        `json:"ratings"`
+	Rated      string     `json:"rated"`
+	Cover      string     `json:"cover"` // art key for /s/art, "" when there is none
+	Hero       string     `json:"hero"`
+	Shots      int        `json:"shots"` // screenshots, at /s/art?k=<lib>&f=shot<n>
+	Lib        string     `json:"lib"`
+	DLC        []storeDLC `json:"dlc"`
+	Ready      bool       `json:"ready"`      // an image is built, so it can be sent right away
+	CanGet     bool       `json:"canGet"`     // it can be built (if needed) and sent
+	OnPS5      string     `json:"onPs5"`      // where it already is on the PS5, if anywhere
+	PS5Folders []string   `json:"ps5Folders"` // its game-folder copies on the PS5
+	BPState    string     `json:"bpState"`    // needs, incomplete, ok or ""
+	BPNote     string     `json:"bpNote"`
+	FirstSeen  string     `json:"firstSeen"`
 	storeProgress
 }
 
@@ -336,7 +339,7 @@ func (a *App) storeProgressLocked() map[string]storeProgress {
 			if p.State == "done" {
 				p.State = "sent"
 			}
-		case strings.HasPrefix(j.Key, "dlc:") || strings.HasPrefix(j.Key, "hb:") || strings.HasPrefix(j.Key, "rom:") || strings.HasPrefix(j.Key, "save:") || strings.HasPrefix(j.Key, "rest:"):
+		case strings.HasPrefix(j.Key, "dlc:") || strings.HasPrefix(j.Key, "hb:") || strings.HasPrefix(j.Key, "ps5bp:") || strings.HasPrefix(j.Key, "rom:") || strings.HasPrefix(j.Key, "save:") || strings.HasPrefix(j.Key, "rest:"):
 			// DLC installs, ROM downloads and save backups and restores
 			switch j.State {
 			case "queued", "failed", "cancelled", "skipped":
@@ -383,7 +386,7 @@ func (a *App) storeGamesLocked() []storeGame {
 		g := storeGame{Key: it.Key, Name: it.Name, ID: it.TitleID, Platform: it.Platform, Version: it.Version, Size: it.Size,
 			Publisher: it.Publisher, Release: it.Release, Genres: it.Genres, Desc: it.Desc, Rating: it.Rating, Ratings: it.Ratings,
 			Rated: it.Rated, Shots: it.Shots, Ready: it.Image != "", CanGet: it.Image != "" || it.CanBuild, OnPS5: it.OnPS5,
-			FirstSeen: it.FirstSeen, storeProgress: prog[it.Key]}
+			FirstSeen: it.FirstSeen, storeProgress: prog[it.Key], PS5Folders: ps5Folders(it.OnPS5List), BPState: it.BPState, BPNote: it.BPNote}
 		if g.Name == "" {
 			g.Name = it.Current
 		}
@@ -729,6 +732,12 @@ func (a *App) storeRoutes(mux *http.ServeMux, rs *remoteServer, writeJSON func(h
 		return map[string]any{"folder": root, "systems": scanRoms(root)}
 	}))
 	// the homebrew store (homebrew.page) and cleaning up the PS5's drives
+	// backporting a game that's on the PS5 as a folder, from the console
+	mux.HandleFunc("/s/ps5/backport", post(func(r *http.Request) (any, error) {
+		var b struct{ Path string }
+		json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&b)
+		return map[string]string{"msg": "Backporting it on the PS5. Close the game first if it's open."}, a.startPS5Backport(b.Path)
+	}))
 	mux.HandleFunc("/s/homebrew", post(func(r *http.Request) (any, error) {
 		var b struct{ Refresh bool }
 		json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&b)

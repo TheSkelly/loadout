@@ -1367,6 +1367,7 @@ function Detail({game, status, progress, installs, startDLC, drive, setDrive, on
               </View>
             ) : null}
             {shown ? <Text className="font-inter text-sm" style={{color: shown.bad ? C.coral : C.sky}}>{shown.text}</Text> : null}
+            <BackportSection game={game} progress={progress} say={setNote} ask={setAsking} />
           </View>
           <DLCSection game={game} progress={progress} installs={installs} startDLC={d => startDLC(game, d)} say={setNote} ask={setAsking} />
           <SavesSection game={game} progress={progress} say={setNote} ask={setAsking} />
@@ -1388,6 +1389,44 @@ function Detail({game, status, progress, installs, startDLC, drive, setDrive, on
         {asking ? <Confirm title={asking.title} body={asking.body} yes={asking.yes} onYes={asking.onYes} onClose={() => setAsking(null)} /> : null}
       </View>
     </FocusScope>
+  );
+}
+
+// a game on this PS5 as a folder that won't start on this firmware: the PC
+// backports it in place (its programs, and the firmware its param.json asks for)
+function BackportSection({game, progress, say, ask}) {
+  const folder = (game.ps5Folders || [])[0];
+  if (!folder) return null;
+  const needs = game.bpState === 'needs' || game.bpState === 'incomplete';
+  const p = progress[`ps5bp:${folder}`];
+  const b = busy(p);
+  const start = async () => {
+    try {
+      const r = await api.ps5Backport(folder);
+      say({text: (r.data && r.data.msg) || 'Backporting it.'});
+    } catch (err) {
+      say({text: err.message, bad: true});
+    }
+  };
+  return (
+    <View className={needs ? 'w-[1000px] gap-[8px] p-[18px] rounded-2xl border-2 border-coral bg-surface/90' : 'w-[1000px] gap-[8px] p-[18px] rounded-2xl border border-line bg-surface/80'}>
+      <Text className={`${T} text-base font-bold`}>{game.bpState === 'incomplete' ? "This backport wasn't finished" : needs ? 'This game needs a backport' : 'Backport on this PS5'}</Text>
+      <Text className="font-inter text-sm text-muted">{needs ? game.bpNote
+        : "Its programs already ask for your firmware or older. If it still closes as soon as it starts, a backport lowers the firmware its param.json asks for and adds fakelib files from your PC (pick them in Loadout's Settings), which some games need."}</Text>
+      {b ? (
+        <View className="gap-[6px]">
+          <Text className="font-inter text-sm text-text">{p.note || 'Backporting'}</Text>
+          <Bar pct={(p.pct || 0) / 10} width={960} color={C.coral} />
+        </View>
+      ) : p && p.state === 'sent' ? <Text className="font-inter text-sm text-mint">{p.note || 'Backported. Start the game again.'}</Text>
+        : p && p.state === 'failed' ? <Text className="font-inter text-sm text-coral">{p.note}</Text> : null}
+      <View className="flex-row pt-[4px]">
+        <Button small primary={needs} label={b ? 'Backporting…' : 'Backport on this PS5'} disabled={b}
+          onPress={() => ask({title: `Backport ${game.name}?`, yes: 'Backport it',
+            body: 'Your PC changes its programs and settings on this PS5 so it starts on this firmware. The originals are kept on the PC. Close the game first if it is running.',
+            onYes: start})} />
+      </View>
+    </View>
   );
 }
 

@@ -65,19 +65,11 @@ func (a *App) runBackport(j *BuildJob, root string, cancelled func() bool) (stri
 	a.mu.Lock()
 	fw, fakeSrc := a.cfg.ConsoleFW, a.cfg.FakelibDir
 	a.mu.Unlock()
-	ps5, ps4, err := backportTargets(fw)
+	bp, err := newBackporter(fw)
 	if err != nil {
 		return "", err
 	}
-	limit := ps5 | 0xFFFF
-	py, err := pythonCmd()
-	if err != nil {
-		return "", err
-	}
-	script := makeFselfScript()
-	if script == "" {
-		return "", errors.New("make_fself.py isn't with this copy of Loadout")
-	}
+	defer bp.close()
 	if !fileExists(filepath.Join(root, "eboot.bin")) {
 		return "", errors.New("there's no eboot.bin at the top of the game folder")
 	}
@@ -88,11 +80,6 @@ func (a *App) runBackport(j *BuildJob, root string, cancelled func() bool) (stri
 	}
 	progs := backportPrograms(root)
 	backups := filepath.Join(appDir(), "backport-backups", filepath.Base(root))
-	tmp, err := os.MkdirTemp("", "loadout-backport-")
-	if err != nil {
-		return "", err
-	}
-	defer os.RemoveAll(tmp)
 	patched := 0
 	for i, p := range progs {
 		if cancelled() {
@@ -104,34 +91,12 @@ func (a *App) runBackport(j *BuildJob, root string, cancelled func() bool) (stri
 		if err != nil {
 			return "", err
 		}
-		v, _, err := programSDK(bytesReaderAt(data), int64(len(data)))
-		if err != nil || v <= limit {
-			continue // already old enough, or not a program with an SDK
-		}
-		elf := data
-		if string(data[:4]) != string(elfMagic) {
-			if elf, err = fselfToELF(data); err != nil {
-				return "", fmt.Errorf("%s: %v", rel, err)
-			}
-		}
-		if _, err := patchELFSDK(elf, ps5, ps4); err != nil {
-			return "", fmt.Errorf("%s: %v", rel, err)
-		}
-		in, out := filepath.Join(tmp, "in.elf"), filepath.Join(tmp, "out.self")
-		if err := os.WriteFile(in, elf, 0644); err != nil {
-			return "", err
-		}
-		cmd := exec.Command(py[0], append(py[1:], "-I", script, in, out)...)
-		hideChild(cmd)
-		if b, err := cmd.CombinedOutput(); err != nil {
-			return "", fmt.Errorf("signing %s failed: %v %s", rel, err, strings.TrimSpace(string(b)))
-		}
-		signed, err := os.ReadFile(out)
+		signed, err := bp.program(rel, data)
 		if err != nil {
 			return "", err
 		}
-		if nv, _, err := programSDK(bytesReaderAt(signed), int64(len(signed))); err != nil || nv > limit {
-			return "", fmt.Errorf("%s didn't come out right after signing", rel)
+		if signed == nil {
+			continue // already old enough, or not a program with an SDK
 		}
 		// keep the original, then put the backported one in its place
 		bk := filepath.Join(backups, rel)
@@ -149,6 +114,23 @@ func (a *App) runBackport(j *BuildJob, root string, cancelled func() bool) (stri
 			return "", err
 		}
 		patched++
+	}
+	// the firmware param.json asks for: the PS5 won't start a game that says
+	// it needs newer firmware, even one built for this one
+	paramNote := ""
+	pj := filepath.Join(root, "sce_sys", "param.json")
+	if b, err := os.ReadFile(pj); err == nil {
+		if nb, old, changed := lowerParamFirmware(b, fw); changed {
+			bk := filepath.Join(backups, "sce_sys", "param.json")
+			if !fileExists(bk) {
+				os.MkdirAll(filepath.Dir(bk), 0755)
+				os.WriteFile(bk, b, 0644)
+			}
+			if err := os.WriteFile(pj, nb, 0644); err != nil {
+				return "", fmt.Errorf("couldn't change param.json: %v", err)
+			}
+			paramNote = fmt.Sprintf("param.json now asks for %s instead of %s", fw, old)
+		}
 	}
 	// the fakelib folder: the game's own, or the one picked in Settings
 	fake := filepath.Join(root, "fakelib")
@@ -174,9 +156,12 @@ func (a *App) runBackport(j *BuildJob, root string, cancelled func() bool) (stri
 		}
 		have = added
 	}
-	msg := fmt.Sprintf("Backported for %s: %d program%s lowered to SDK %s", fw, patched, plural(patched), sdkText(ps5))
+	msg := fmt.Sprintf("Backported for %s: %d program%s lowered to SDK %s", fw, patched, plural(patched), sdkText(bp.ps5))
 	if patched == 0 {
 		msg = fmt.Sprintf("Every program already asks for %s or older", fw)
+	}
+	if paramNote != "" {
+		msg += "; " + paramNote
 	}
 	switch {
 	case added > 0:
@@ -262,4 +247,76 @@ func (a *App) queueFolderSendLocked(j *BuildJob, folder string) {
 	sj.Dest, sj.DestLabel = a.destLocked(j.sendDrive)
 	a.addJobsLocked([]*BuildJob{sj})
 	a.enqueuePS5Locked(sj)
+}
+
+// backporter backports one program at a time for a console firmware.
+type backporter struct {
+	ps5, ps4, limit uint32
+	py              []string
+	script, tmp     string
+}
+
+func newBackporter(fw string) (*backporter, error) {
+	ps5, ps4, err := backportTargets(fw)
+	if err != nil {
+		return nil, err
+	}
+	py, err := pythonCmd()
+	if err != nil {
+		return nil, err
+	}
+	script := makeFselfScript()
+	if script == "" {
+		return nil, errors.New("make_fself.py isn't with this copy of Loadout")
+	}
+	tmp, err := os.MkdirTemp("", "loadout-backport-")
+	if err != nil {
+		return nil, err
+	}
+	return &backporter{ps5: ps5, ps4: ps4, limit: ps5 | 0xFFFF, py: py, script: script, tmp: tmp}, nil
+}
+
+func (b *backporter) close() { os.RemoveAll(b.tmp) }
+
+// needs: the program asks for a newer SDK than the console runs.
+func (b *backporter) needs(data []byte) bool {
+	v, _, err := programSDK(bytesReaderAt(data), int64(len(data)))
+	return err == nil && v > b.limit
+}
+
+// program answers the backported program, or nil when it doesn't need it.
+func (b *backporter) program(rel string, data []byte) ([]byte, error) {
+	if !b.needs(data) {
+		return nil, nil
+	}
+	elf := data
+	if string(data[:4]) != string(elfMagic) {
+		var err error
+		if elf, err = fselfToELF(data); err != nil {
+			return nil, fmt.Errorf("%s: %v", rel, err)
+		}
+	} else {
+		elf = append([]byte(nil), data...)
+	}
+	if _, err := patchELFSDK(elf, b.ps5, b.ps4); err != nil {
+		return nil, fmt.Errorf("%s: %v", rel, err)
+	}
+	in, out := filepath.Join(b.tmp, "in.elf"), filepath.Join(b.tmp, "out.self")
+	os.Remove(out)
+	if err := os.WriteFile(in, elf, 0644); err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(b.py[0], append(b.py[1:], "-I", b.script, in, out)...)
+	hideChild(cmd)
+	if o, err := cmd.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("signing %s failed: %v %s", rel, err, strings.TrimSpace(string(o)))
+	}
+	signed, err := os.ReadFile(out)
+	if err != nil {
+		return nil, err
+	}
+	if nv, _, err := programSDK(bytesReaderAt(signed), int64(len(signed))); err != nil || nv > b.limit {
+		return nil, fmt.Errorf("%s didn't come out right after signing", rel)
+	}
+	return signed, nil
 }

@@ -190,6 +190,10 @@ type remoteGame struct {
 	CanBuild bool   `json:"canBuild"`
 	OnPS5    string `json:"onPs5"`
 	Busy     bool   `json:"busy"`
+	// backporting: its game-folder copies on the PS5, and what it needs
+	PS5Folders []string `json:"ps5Folders"`
+	BPState    string   `json:"bpState"`
+	BPNote     string   `json:"bpNote"`
 }
 
 type remoteState struct {
@@ -308,7 +312,8 @@ func (a *App) remoteStateLocked() remoteState {
 		if it.IsDLC || it.IsFile || !(it.Present || it.ExfatOnly) {
 			continue
 		}
-		g := remoteGame{Key: it.Key, Name: it.Name, ID: it.TitleID, Size: it.Size, HasImage: it.Image != "", CanBuild: it.CanBuild, OnPS5: it.OnPS5, Busy: busyKeys[it.Key]}
+		g := remoteGame{Key: it.Key, Name: it.Name, ID: it.TitleID, Size: it.Size, HasImage: it.Image != "", CanBuild: it.CanBuild, OnPS5: it.OnPS5, Busy: busyKeys[it.Key],
+			PS5Folders: ps5Folders(it.OnPS5List), BPState: it.BPState, BPNote: it.BPNote}
 		if g.Name == "" {
 			g.Name = it.Current
 		}
@@ -513,6 +518,11 @@ func (a *App) remoteHandler(rs *remoteServer) http.Handler {
 			return nil, err
 		}
 		return map[string]string{"msg": msg}, nil
+	}))
+	mux.HandleFunc("/r/ps5backport", post(func(r *http.Request) (any, error) {
+		var b struct{ Path string }
+		json.NewDecoder(r.Body).Decode(&b)
+		return nil, a.startPS5Backport(b.Path)
 	}))
 	mux.HandleFunc("/r/job", post(func(r *http.Request) (any, error) {
 		var b struct {

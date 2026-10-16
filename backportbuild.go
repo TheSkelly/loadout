@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"regexp"
+	"strings"
 )
 
 // Backporting a program: the steps BackPork takes, done here.
@@ -148,4 +150,32 @@ func backportTargets(fw string) (ps5, ps4 uint32, err error) {
 	}
 	fmt.Sscanf(fmt.Sprintf("%02d%02d", half/100, half%100), "%x", &ps4)
 	return ps5, ps4<<16 | 0x0001, nil
+}
+
+// paramRequiredRe finds the firmware a game's param.json says it needs.
+var paramRequiredRe = regexp.MustCompile(`("requiredSystemSoftwareVersion"\s*:\s*")0x([0-9A-Fa-f]{16})(")`)
+
+// paramFirmware is what a param.json asks for, as "13.60" ("" if it doesn't say).
+func paramFirmware(param []byte) string {
+	m := paramRequiredRe.FindSubmatch(param)
+	if m == nil {
+		return ""
+	}
+	v := string(m[2])
+	return strings.TrimLeft(v[0:2], "0") + "." + v[2:4]
+}
+
+// lowerParamFirmware sets the firmware a param.json asks for to the console's
+// when it asks for newer: the PS5 won't start a game that says it needs a
+// newer firmware, even one built for this one. The rest of the file is kept
+// exactly as it was.
+func lowerParamFirmware(param []byte, fw string) ([]byte, string, bool) {
+	have := paramFirmware(param)
+	if have == "" || fwValue(have) <= fwValue(fw) {
+		return param, have, false
+	}
+	n := fwValue(fw)
+	val := fmt.Sprintf("%02d%02d000000000000", n/100, n%100)
+	out := paramRequiredRe.ReplaceAll(param, []byte("${1}0x"+val+"${3}"))
+	return out, have, true
 }

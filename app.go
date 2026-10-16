@@ -835,7 +835,7 @@ func (a *App) stateLocked() State {
 		if !known && it.Image != "" {
 			l, known = gameLookFor(it.Image)
 		}
-		it.BPState, it.BPNote = backportState(l, known, it.SDK, a.cfg.ConsoleFW)
+		it.BPState, it.BPNote = backportState(l, known, it.SDK, it.ReqFW, a.cfg.ConsoleFW)
 		it.NeedsFW = it.BPState == "needs" || it.BPState == "incomplete"
 		it.Backport = it.BPState == "ok"
 	}
@@ -2160,6 +2160,16 @@ func (a *App) handler() http.Handler {
 		var b struct{ Paths []string }
 		body(r, &b)
 		return a.cleanupDelete(b.Paths)
+	})
+	api("/api/ps5/backport", func(r *http.Request) (any, error) {
+		var b struct{ Path string }
+		body(r, &b)
+		return nil, a.startPS5Backport(b.Path)
+	})
+	api("/api/ps5/backport/check", func(r *http.Request) (any, error) {
+		var b struct{ Path string }
+		body(r, &b)
+		return a.ps5BackportCheck(b.Path)
 	})
 	api("/api/backport", func(r *http.Request) (any, error) {
 		var b struct {

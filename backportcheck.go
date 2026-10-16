@@ -49,6 +49,7 @@ type backportCheck struct {
 	Highest      string    `json:"highest"`    // the newest SDK any program asks for
 	Fakelib      int       `json:"fakelib"`    // files in the fakelib folder
 	Unreadable   int       `json:"unreadable"` // programs whose SDK couldn't be read
+	ReqFW        string    `json:"reqFw"`      // the firmware param.json asks for
 	Verdict      string    `json:"verdict"`    // runs, needs, incomplete, unknown
 	Explanation  string    `json:"explanation"`
 	highestValue uint32

@@ -129,6 +129,8 @@ export const api = {
   // leftovers of stopped copies on the PS5's drives
   cleanupScan: () => call(`${base}/s/cleanup/scan`, {body: {}}),
   cleanupDelete: paths => call(`${base}/s/cleanup/delete`, {body: {Paths: paths}}),
+  // backport a game that's on this PS5 as a folder, in place
+  ps5Backport: path => call(`${base}/s/ps5/backport`, {body: {Path: path}}),
   // one download in the queue: stop, pause, resume, up or down
   job: (id, action) => call(`${base}/s/job`, {body: {ID: id, Action: action}}),
 };

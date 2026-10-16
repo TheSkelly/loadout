@@ -330,7 +330,7 @@ function renderDrawer() {
     ["Size", it.sized ? esc(size(it.size)) : "Calculating…"],
     [it.isPkg ? "PKG file" : "Folder", it.exfatOnly ? "Removed, the game now lives in its exFAT image" : esc(it.path)],
     ["exFAT image", it.isPkg ? "Not needed, PS4 games install from the PKG" : it.image ? esc(it.image) : "Not built yet"],
-    ["On the PS5", it.onPs5List && it.onPs5List.length ? `<ul class="ps5copies">${it.onPs5List.map(c => `<li><span><b>${esc(c.drive)}</b>, ${esc({ image: "image", folder: "game folder", installed: "installed" }[c.kind] || c.kind)}${c.size ? ", " + size(c.size) : ""}<i class="mono">${esc(c.path)}</i></span>${c.kind === "installed" ? `<em title="Installed games are deleted from the PS5's own game menu">delete on the PS5</em>` : `<span class="rowbtns">${c.kind === "image" && drives().length > 1 ? `<button class="btn ghost sm" data-act="ps5move" data-p="${esc(c.path)}">${ICON.arrow}Move</button>` : ""}<button class="btn ghost sm danger" data-act="ps5del" data-k="${esc(it.key)}" data-p="${esc(c.path)}">${ICON.trash}Delete</button></span>`}</li>`).join("")}</ul>` : it.onPs5 ? esc(it.onPs5) : (S.ps5 && S.ps5.online && S.ps5.scanned ? "Not on the PS5" : it.image ? "Not sent yet" : "No image to send")],
+    ["On the PS5", it.onPs5List && it.onPs5List.length ? `<ul class="ps5copies">${it.onPs5List.map(c => `<li><span><b>${esc(c.drive)}</b>, ${esc({ image: "image", folder: "game folder", installed: "installed" }[c.kind] || c.kind)}${c.size ? ", " + size(c.size) : ""}<i class="mono">${esc(c.path)}</i></span>${c.kind === "installed" ? `<em title="Installed games are deleted from the PS5's own game menu">delete on the PS5</em>` : `<span class="rowbtns">${c.kind === "folder" ? `<button class="btn ${it.needsFw ? "primary" : "ghost"} sm" data-act="ps5bp" data-p="${esc(c.path)}" data-k="${esc(it.key)}">Backport</button>` : ""}${c.kind === "image" && drives().length > 1 ? `<button class="btn ghost sm" data-act="ps5move" data-p="${esc(c.path)}">${ICON.arrow}Move</button>` : ""}<button class="btn ghost sm danger" data-act="ps5del" data-k="${esc(it.key)}" data-p="${esc(c.path)}">${ICON.trash}Delete</button></span>`}</li>`).join("")}</ul>` : it.onPs5 ? esc(it.onPs5) : (S.ps5 && S.ps5.online && S.ps5.scanned ? "Not on the PS5" : it.image ? "Not sent yet" : "No image to send")],
     ["Name came from", esc({ "param.json": "Game metadata (param.json)", "param.sfo": "Game metadata (param.sfo)", "nptitle.dat": "nptitle.dat", "saved": "Name you typed", "manual": "Name you typed", "folder name": "Old folder name, worth checking", "library": "Earlier scan", "matched": "Matching game folder" }[it.source] || "Unknown")],
     ["First seen", esc(it.firstSeen)],
   ];
@@ -956,7 +956,7 @@ function renderPS5() {
       <span class="size">${r.kind === "image" && r.size ? esc(size(r.size)) : ""}</span>
       ${mv ? `<span class="rowprog"><span class="bar sending"><i style="width:${mv.pct / 10}%"></i></span>${mv.state === "queued" ? "Waiting to move" : "Moving " + Math.floor(mv.pct / 10) + "%"}</span>`
         : inst ? `<span class="instnote" title="Installed games are deleted from the PS5's own game menu">Delete on PS5</span>`
-        : `<span class="rowbtns">${r.kind === "image" && canMove ? `<button class="btn ghost sm" data-psmove="${esc(r.path)}" title="Move to another PS5 drive">${ICON.arrow}Move</button>` : ""}<button class="btn ghost sm danger" data-psdel="${esc(r.path)}">${ICON.trash}Delete</button></span>`}
+        : `<span class="rowbtns">${r.kind === "folder" && it ? `<button class="btn ${it.needsFw ? "primary" : "ghost"} sm" data-act="ps5bp" data-p="${esc(r.path)}" data-k="${esc(it.key)}" title="${esc(it.bpNote)}">Backport</button>` : ""}${r.kind === "image" && canMove ? `<button class="btn ghost sm" data-psmove="${esc(r.path)}" title="Move to another PS5 drive">${ICON.arrow}Move</button>` : ""}<button class="btn ghost sm danger" data-psdel="${esc(r.path)}">${ICON.trash}Delete</button></span>`}
     </div>`;
   }).join("");
 }
@@ -1017,7 +1017,7 @@ function renderDock() {
       <div class="track"><i style="width:${overallPct() / 10}%"></i></div>
       ${b.building ? `<button class="btn danger sm" data-act="stopbuild">Stop</button>` : `<span></span>`}</div>`);
   }
-  const pjobs = jobs.filter(x => (x.kind === "build" && x.send) || ["send", "sendfolder", "ps5del", "ps5move", "savebak", "saverest", "savedel", "fxup", "fxdown", "fxupdir", "fxzip", "fxzipflat", "pkginst", "hbinst", "hbdel"].includes(x.kind));
+  const pjobs = jobs.filter(x => (x.kind === "build" && x.send) || ["send", "sendfolder", "ps5del", "ps5move", "savebak", "saverest", "savedel", "fxup", "fxdown", "fxupdir", "fxzip", "fxzipflat", "pkginst", "hbinst", "hbdel", "ps5backport"].includes(x.kind));
   if (pjobs.length) {
     const fin = ["sent", "done", "failed", "cancelled", "skipped"];
     const doneN = pjobs.filter(x => fin.includes(ps5State(x))).length;
@@ -1025,7 +1025,7 @@ function renderDock() {
     const cur = pjobs.find(x => live.includes(ps5State(x)));
     const liveN = pjobs.filter(x => ps5State(x) === "sending").length;
     const pct = pjobs.reduce((a, x) => a + (fin.includes(ps5State(x)) ? 1000 : live.includes(ps5State(x)) ? (x.kind === "build" ? x.sendPct : x.pct) : 0), 0) / pjobs.length;
-    const what = cur ? (ps5State(cur) === "copying" ? `Copying ${esc(cur.name)}` : ps5State(cur) === "saving" ? `Backing up the save for ${esc(cur.name)}` : ps5State(cur) === "restoring" ? `Restoring the save for ${esc(cur.name)}` : ps5State(cur) === "deleting" ? `Deleting ${esc(cur.name)} from the PS5` : ps5State(cur) === "moving" ? `Moving ${esc(cur.name)} (${esc(cur.out)})` : (liveN > 1 ? `Sending ${pjobs.filter(x => ps5State(x) === "sending").map(x => esc(x.name)).join(", ")}` : `Sending ${esc(cur.name)} to the PS5`)) : doneN === pjobs.length ? "PS5 jobs done" : "Waiting for the next PS5 job";
+    const what = cur ? (cur.kind === "ps5backport" ? `Backporting ${esc(cur.name)} on the PS5` : ps5State(cur) === "copying" ? `Copying ${esc(cur.name)}` : ps5State(cur) === "saving" ? `Backing up the save for ${esc(cur.name)}` : ps5State(cur) === "restoring" ? `Restoring the save for ${esc(cur.name)}` : ps5State(cur) === "deleting" ? `Deleting ${esc(cur.name)} from the PS5` : ps5State(cur) === "moving" ? `Moving ${esc(cur.name)} (${esc(cur.out)})` : (liveN > 1 ? `Sending ${pjobs.filter(x => ps5State(x) === "sending").map(x => esc(x.name)).join(", ")}` : `Sending ${esc(cur.name)} to the PS5`)) : doneN === pjobs.length ? "PS5 jobs done" : "Waiting for the next PS5 job";
     const fileNow = cur && b.sendFile && b.sendFile !== cur.name ? `${esc(b.sendFile)} · ` : "";
     const sub = cur && ps5State(cur) === "deleting" ? esc(cur.note || "") : `${fileNow}${doneN} of ${pjobs.length} done${b.sendSpeed && cur ? ", " + size(b.sendSpeed) + "/s" : ""}${b.sendEta && cur ? ", " + dur(b.sendEta) + " left" : ""}${b.sendSlow && cur ? ", " + esc(b.sendSlow) : ""}`;
     lanes.push(`<div class="lane"><div class="what" title="${esc(what.replace(/<[^>]+>/g, ""))}">${what}<small>${sub}</small></div>
@@ -1420,6 +1420,7 @@ document.addEventListener("click", async e => {
     case "unpack": return act("unpack", { Images: [b.dataset.img] }, "Turning the image into a game folder. Progress shows in the bar at the bottom.");
     case "unpackmany": return pickUnpack();
     case "backport": return askBackport(b.dataset.k, b.dataset.img);
+    case "ps5bp": return askPS5Backport(b.dataset.p, b.dataset.k);
     case "sendfolder": return act("sendfolder", { Keys: [k], Drive: defDrive() }, "Sending the game folder to the PS5. Progress shows under Build & send.");
     case "build1": return buildKeys([k]);
     case "remove1": return removeFolder(it);
@@ -2117,3 +2118,23 @@ $("#getStarted").addEventListener("click", e => {
   if (b.dataset.start === "start-folder") return pickGames();
   showView("settings"); showSetTab("ps5");
 });
+
+// backporting the copy of a game that's on the PS5 as a folder, in place
+async function askPS5Backport(path, key) {
+  const it = S.items.find(i => i.key === key) || {};
+  if (!S.settings.ConsoleFW) { toast("Set your PS5's firmware in Settings first.", true); showView("settings"); return; }
+  let check = null;
+  try { check = await api("ps5/backport/check", { Path: path }); } catch (e) { toast(e.message, true); return; }
+  const fine = check.verdict === "runs";
+  const r = await modal(`<h3>Backport ${esc(it.name || path.split("/").pop())} on the PS5</h3>
+    <p>${esc(check.explanation)}${fine ? " If it still closes as soon as it starts, a backport can still help: it lowers what its param.json asks for and adds fakelib files, which some games need." : ""}</p>
+    <ol class="steps">
+      <li>${fine ? `Its programs are left as they are: they already ask for ${esc(check.highest)}, which your ${esc(S.settings.ConsoleFW)} runs.` : `Its programs come over to this PC, are lowered to your ${esc(S.settings.ConsoleFW)} and signed again, then go back in place. The rest of the game stays where it is.`}</li>
+      ${check.reqFw && check.reqFw !== S.settings.ConsoleFW ? `<li>Its param.json is changed to ask for ${esc(S.settings.ConsoleFW)} instead of ${esc(check.reqFw)}.</li>` : ""}
+      <li>${check.fakelib ? "Its own fakelib folder is kept." : S.settings.FakelibDir ? "The fakelib files from your fakelib folder are added." : "It has no fakelib folder; if it still won't start, pick a fakelib folder in Settings and backport it again."}</li>
+    </ol>
+    <p class="muted">The originals are kept on this PC, so it can be undone. Close the game on the PS5 first.</p>`,
+    [{ label: "Cancel" }, { label: "Backport it", cls: "primary" }]);
+  if (!r || r.i !== 1) return;
+  act("ps5/backport", { Path: path }, "Backporting it on the PS5. Progress shows in the bar at the bottom.");
+}

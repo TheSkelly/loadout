@@ -196,6 +196,8 @@ func (a *App) runPS5Job(j *BuildJob) {
 			note, err = a.saveRestore(j)
 		case "savedel":
 			note, err = a.saveDelete(j)
+		case "ps5backport":
+			note, err = a.runPS5Backport(j)
 		case "hbinst":
 			note, err = a.runHomebrewInstall(j)
 		case "hbdel":
