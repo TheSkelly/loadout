@@ -311,29 +311,31 @@ func (a *App) outDir() string {
 // ---------------- state for the UI ----------------
 
 type Item struct {
-	Key       string `json:"key"`
-	LibKey    string `json:"libKey"`
-	Name      string `json:"name"`
-	TitleID   string `json:"titleId"`
-	Platform  string `json:"platform"`
-	Version   string `json:"version"`
-	SDK       string `json:"sdk"`
-	ReqFW     string `json:"reqFw"`
-	NeedsFW   bool   `json:"needsFw"`
-	Backport  bool   `json:"backport"`
-	BPState   string `json:"bpState"` // needs, incomplete, ok or ""
-	BPNote    string `json:"bpNote"`
-	Category  string `json:"category"`
-	ContentID string `json:"contentId"`
-	Size      int64  `json:"size"`
-	Sized     bool   `json:"sized"`
-	Path      string `json:"path"`
-	Current   string `json:"current"`
-	IsFile    bool   `json:"isFile"`
-	IsPkg     bool   `json:"isPkg"`
-	Present   bool   `json:"present"`
-	Cover     bool   `json:"cover"`
-	Source    string `json:"source"`
+	Key      string `json:"key"`
+	LibKey   string `json:"libKey"`
+	Name     string `json:"name"`
+	TitleID  string `json:"titleId"`
+	Platform string `json:"platform"`
+	Version  string `json:"version"`
+	SDK      string `json:"sdk"`
+	ReqFW    string `json:"reqFw"`
+	NeedsFW  bool   `json:"needsFw"`
+	Backport bool   `json:"backport"`
+	BPState  string `json:"bpState"` // needs, incomplete, ok or ""
+	BPNote   string `json:"bpNote"`
+	// its folder is backported but its image isn't: sends take the folder
+	ImageStale bool   `json:"imageStale"`
+	Category   string `json:"category"`
+	ContentID  string `json:"contentId"`
+	Size       int64  `json:"size"`
+	Sized      bool   `json:"sized"`
+	Path       string `json:"path"`
+	Current    string `json:"current"`
+	IsFile     bool   `json:"isFile"`
+	IsPkg      bool   `json:"isPkg"`
+	Present    bool   `json:"present"`
+	Cover      bool   `json:"cover"`
+	Source     string `json:"source"`
 	// rename
 	NewName   string `json:"newName"`
 	Status    string `json:"status"`
@@ -838,6 +840,7 @@ func (a *App) stateLocked() State {
 		it.BPState, it.BPNote = backportState(l, known, it.SDK, it.ReqFW, a.cfg.ConsoleFW)
 		it.NeedsFW = it.BPState == "needs" || it.BPState == "incomplete"
 		it.Backport = it.BPState == "ok"
+		it.ImageStale = imageStale(roots[it.Key], it.Image, a.cfg.ConsoleFW)
 	}
 	if st.Items == nil {
 		st.Items = []Item{}
@@ -2729,8 +2732,13 @@ func (a *App) startSend(items []sendItem) error {
 		return errors.New("Set your PS5's IP address in Settings first.")
 	}
 	var jobs []*BuildJob
+	var folders []sendItem
 	for _, it := range items {
 		if !strings.HasSuffix(strings.ToLower(it.Image), ".exfat") || !fileExists(it.Image) {
+			continue
+		}
+		if g := a.gameByKey(it.Key); g != nil && !g.IsFile && imageStale(g.Meta.Root, it.Image, a.cfg.ConsoleFW) {
+			folders = append(folders, it) // the image predates the backport
 			continue
 		}
 		fi, _ := os.Stat(it.Image)
@@ -2738,7 +2746,21 @@ func (a *App) startSend(items []sendItem) error {
 		j.Dest, j.DestLabel = a.destLocked(it.Drive)
 		jobs = append(jobs, j)
 	}
+	if len(folders) > 0 {
+		a.mu.Unlock()
+		err := a.startSendFolder(folders)
+		a.mu.Lock()
+		if err != nil {
+			return err
+		}
+		a.toast = append(a.toast, fmt.Sprintf("Sending %d backported game folder%s instead of %s image%s, which %s from before the backport.",
+			len(folders), plural(len(folders)), map[bool]string{true: "its", false: "their"}[len(folders) == 1], plural(len(folders)),
+			map[bool]string{true: "is", false: "are"}[len(folders) == 1]))
+	}
 	if len(jobs) == 0 {
+		if len(folders) > 0 {
+			return nil
+		}
 		return errors.New("Those games don't have an image to send yet.")
 	}
 	a.addJobsLocked(jobs)

@@ -272,6 +272,7 @@ function tagsHTML(it, forDrawer) {
   else if (it.needsFw) t.push(`<span class="tag coral" title="${esc(it.bpNote)}">Needs backport</span>`);
   else if (forDrawer && it.reqFw) t.push(`<span class="tag dim">FW ${esc(it.reqFw)}</span>`);
   if (it.backport) t.push(`<span class="tag gold" title="${esc(it.bpNote)}">Backported</span>`);
+  if (it.imageStale) t.push(`<span class="tag coral" title="Its folder is backported, but its exFAT image is from before the backport and won't start on your PS5. Loadout sends the folder instead; rebuild the image (Build & send, with Rebuild images that already exist on) if you want an image.">Image out of date</span>`);
   if (it.wrap && !it.done) t.push(`<span class="tag sky">Loose files</span>`);
   if (dlcCount(it)) t.push(`<span class="tag lilac">DLC ${dlcCount(it)}</span>`);
   if (it.onPs5) t.push(`<span class="tag sky" title="${esc(ps5Copies(it))}">On PS5</span>`);

@@ -444,7 +444,7 @@ func (a *App) storeGet(key, drive string) (string, error) {
 		if name == "" {
 			name = it.Current
 		}
-		if folders && it.Present && it.CanBuild {
+		if (folders || it.ImageStale) && it.Present && it.CanBuild {
 			if err := a.startSendFolder([]sendItem{{Key: key, Drive: drive}}); err != nil {
 				return "", err
 			}

@@ -160,6 +160,19 @@ func setImageLookDirs(dirs, folders []string) {
 	}
 }
 
+// imageStale: the game's folder was backported for this console but its
+// image wasn't (backporting a game turns its image into a folder and leaves
+// the image as it was), so the image won't start where the folder will.
+func imageStale(root, image, console string) bool {
+	fw := sdkOfFirmware(console)
+	if root == "" || image == "" || fw == 0 {
+		return false
+	}
+	f, fok := gameLookFor(root)
+	i, iok := gameLookFor(image)
+	return fok && iok && f.SDK != 0 && f.SDK <= fw && i.SDK > fw
+}
+
 // backportState: what a game needs on this console. "needs" (built for newer
 // firmware, not backported), "incomplete" (a fakelib folder, but its programs
 // still ask for newer firmware: it won't start), "ok" (backported and checked),

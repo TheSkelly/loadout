@@ -12,8 +12,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
 	webview2 "github.com/jchv/go-webview2"
@@ -439,6 +441,12 @@ func recycle(path string, noAsk bool) (kept bool, err error) {
 func main() {
 	if alreadyRunning() {
 		return // the other copy (maybe hidden in the tray) was brought to the front
+	}
+	// a window app has nowhere to print a crash: keep the report in crash.log
+	os.MkdirAll(appDir(), 0755)
+	if f, err := os.OpenFile(filepath.Join(appDir(), "crash.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); err == nil {
+		fmt.Fprintf(f, "\n--- Loadout %s started %s\n", appVersion, time.Now().Format(time.RFC3339))
+		debug.SetCrashOutput(f, debug.CrashOptions{})
 	}
 	a := newApp()
 	if os.Getenv("TT_TESTDIALOG") != "" { // developer check of the folder picker
