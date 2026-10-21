@@ -867,3 +867,4 @@ body { background: radial-gradient(1200px 500px at 70% -10%, #0E1A33 0%, transpa
 details.adv { margin-top: 14px; border-top: 1px solid var(--line-soft); padding-top: 10px; }
 details.adv summary { cursor: pointer; color: var(--muted); }
 details.adv[open] summary { margin-bottom: 8px; }
+.emuup { color: var(--accent); font-weight: 600; }

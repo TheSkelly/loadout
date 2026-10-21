@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -87,8 +88,10 @@ type EmuApp struct {
 	GamesDir string    `json:"gamesDir"` // full path, "" when unknown
 	Games    int       `json:"games"`
 	Size     int64     `json:"size"`
-	Slots    []EmuSlot `json:"slots"` // games first, then anything else the app needs
-	Icon     string    `json:"icon"`  // title ID whose icon was fetched, "" when none
+	Slots    []EmuSlot `json:"slots"`   // games first, then anything else the app needs
+	Icon     string    `json:"icon"`    // title ID whose icon was fetched, "" when none
+	Version  string    `json:"version"` // its contentVersion on the PS5
+	Latest   string    `json:"latest"`  // a newer release (GitHub or the catalog), "" when it's current
 }
 
 func isGameFile(e ftpEntry) bool {
@@ -149,6 +152,15 @@ func (a *App) emuList(f *ftpConn) []EmuApp {
 					app.Icon = id
 				}
 			}
+			if b, err := f.get(path.Join(app.Path, "sce_sys", "param.json"), 1<<20); err == nil {
+				var pj struct {
+					ContentVersion string `json:"contentVersion"`
+				}
+				if json.Unmarshal(b, &pj) == nil {
+					app.Version = pj.ContentVersion
+				}
+			}
+			app.Latest = hbUpdateFor(strings.ToUpper(e.Name), app.Version)
 			app.GamesDir = a.emuGamesDir(f, e.Name, app.Path)
 			count := func(dir string) (n int, size int64) {
 				if gs, err := f.list(dir); err == nil {

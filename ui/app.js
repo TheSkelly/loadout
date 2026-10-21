@@ -208,7 +208,7 @@ function render() {
   $("#nav-build").textContent = S.build.running ? Math.round((buildPct >= 1000 && sj.length ? sendPct : buildPct) / 10) + "%" : "";
   $("#railfoot").textContent = S.scanErr ? "Scan failed: " + S.scanErr : "";
   renderLibrary(); renderRename(); renderPCDrives(); renderBuild(); renderPS5(); renderSaves(); renderFiles(); if (view === "emu") renderEmu(); renderSettings();
-  { const n = S.build.jobs.filter(x => x.kind.startsWith("fx") && ["done", "failed", "cancelled"].includes(x.state)).length; if (n !== emuJobsDone) { emuJobsDone = n; if (view === "emu") emuLoad(); } }
+  { const n = S.build.jobs.filter(x => (x.kind.startsWith("fx") || x.kind === "hbinst") && ["done", "failed", "cancelled"].includes(x.state)).length; if (n !== emuJobsDone) { emuJobsDone = n; if (view === "emu") emuLoad(); } }
   { const n = S.build.jobs.filter(x => x.kind.startsWith("fx") && x.state === "done").length; if (n !== fxJobsDone) { fxJobsDone = n; if (view === "files" || view === "homebrew") fxLoad(); } } renderDock();
   if (drawerKey) renderDrawer();
 }
@@ -606,11 +606,12 @@ function renderEmu() {
     else if (!EM.apps.length) html = `<div class="empty"><p>${EM.busy || !EM.loaded ? "Looking for emulators on the PS5…" : "No emulators on the PS5 yet. Click Install from a ZIP and pick an emulator's download."}</p></div>`;
     else html = romLibNote() + `<div class="emugrid">` + EM.apps.map(a => `<button class="emucard" data-emuopen="${esc(a.path)}">
         ${emuIcon(a)}<span class="emutxt"><b>${esc(a.name)}</b><small>${esc(a.system || "Homebrew app")}</small>
-        <small>${a.gamesDir ? `${a.games} game${a.games === 1 ? "" : "s"}${a.size ? ", " + size(a.size) : ""}` : "Games folder not set"} · ${esc(a.drive)}</small></span></button>`).join("") + `</div>`;
+        <small>${a.gamesDir ? `${a.games} game${a.games === 1 ? "" : "s"}${a.size ? ", " + size(a.size) : ""}` : "Games folder not set"} · ${esc(a.drive)}${a.version ? " · v" + esc(a.version) : ""}</small>
+        ${a.latest ? `<small class="emuup">Update available: ${esc(a.latest)}</small>` : ""}</span></button>`).join("") + `</div>`;
   } else {
     bh = `<button class="btn ghost" data-emu="back">‹ All emulators</button><span class="grow"></span>
       <button class="btn primary" data-emu="add" ${emuSlot(app) ? "" : "disabled"}>${esc((emuSlot(app) || {}).add || "Add game")}</button><button class="btn ghost" data-emu="addfolder" ${emuSlot(app) ? "" : "disabled"}>Add a folder</button>
-      ${app.folder === "PPSA99008" && emuSlot(app) && emuSlot(app).key === "games" ? `<button class="btn ghost" data-emu="ids" title="Put each game's ID in its file name, so cheats and mods match up">Add game IDs</button>` : ""}<button class="btn ghost" data-emu="update" title="Install a newer version from its ZIP. Your games and settings stay">Update emulator</button><button class="btn ghost" data-emu="files">Browse files</button><button class="btn ghost" data-emu="refresh">Refresh</button>`;
+      ${app.folder === "PPSA99008" && emuSlot(app) && emuSlot(app).key === "games" ? `<button class="btn ghost" data-emu="ids" title="Put each game's ID in its file name, so cheats and mods match up">Add game IDs</button>` : ""}${app.latest ? `<button class="btn primary" data-emu="ghupdate" title="Loadout downloads ${esc(app.latest)} and installs it. Your games and settings stay">Update to ${esc(app.latest)}</button>` : ""}<button class="btn ghost" data-emu="update" title="Install a newer version from a ZIP you have. Your games and settings stay">Update from a ZIP</button><button class="btn ghost" data-emu="files">Browse files</button><button class="btn ghost" data-emu="refresh">Refresh</button>`;
     const head = `<div class="emuhead">${emuIcon(app)}<div><h2>${esc(app.name)}</h2><p>${esc(app.system || "Homebrew app")} · ${esc(app.drive)} · <span class="mono">${esc(app.path)}</span></p>
       <p>${app.gamesDir ? `Games go in <span class="mono">${esc(app.gamesDir)}</span>` : "Loadout doesn't know where this app keeps its games."} ${app.gamesDir && !app.gamesDir.startsWith(app.path + "/") ? "" : `<button class="linkbtn" data-emu="setdir">${app.gamesDir ? "Change" : "Choose the games folder"}</button> · `}<button class="linkbtn dangerlink" data-emu="remove">Remove this emulator</button></p></div></div>`;
     const sl = emuSlot(app), dir = sl ? sl.dir : "", isGames = !sl || sl.key === "games";
@@ -728,6 +729,12 @@ $("#view-emu").addEventListener("click", async e => {
     case "refresh": return emuLoad();
     case "romlib": return pickRomLib();
     case "back": EM.cur = ""; return renderEmu();
+    case "ghupdate": {
+      const app = EM.apps.find(x => x.path === EM.cur);
+      if (!app) return;
+      if (!await confirmBox(`Update ${app.name} to ${app.latest}?`, `Loadout downloads it, checks it and puts it on the PS5. Your games, keys and settings stay. Close ${esc(app.name)} on the PS5 first.`, "Update")) return;
+      return act("homebrew/do", { ID: app.folder, Action: "install" }, `Updating ${app.name}. Progress shows in the bar at the bottom.`);
+    }
     case "add":
       if (emuSlot(app).key === "mods") return cheatsAdd(emuSlot(app).dir);
       return act("emu/add", { Dir: emuSlot(app).dir, Unzip: !!emuSlot(app).unzip });
@@ -1997,7 +2004,7 @@ function renderStore() {
   $("#storeGrid").innerHTML = list.map(a => {
     const j = brewJob(a.id), busy = j && ["queued", "sending", "deleting"].includes(j.state);
     return `<button class="brew" data-brew="${esc(a.id)}"><span class="art">${a.icon ? `<img src="${esc(a.icon)}" alt="" loading="lazy">` : `<b>${esc(a.name)}</b>`}${
-      busy ? `<span class="tag">${j.state === "queued" ? "Waiting" : Math.floor((j.pct || 0) / 10) + "%"}</span>` : a.update ? `<span class="tag up">Update</span>` : a.installed ? `<span class="tag">Installed</span>` : ""}</span>
+      busy ? `<span class="tag">${j.state === "queued" ? "Waiting" : Math.floor((j.pct || 0) / 10) + "%"}</span>` : a.update ? `<span class="tag up">Update ${esc(a.version)}</span>` : a.installed ? `<span class="tag">Installed</span>` : ""}</span>
       ${busy && j.pct ? `<span class="bar"><i style="width:${j.pct / 10}%"></i></span>` : ""}<span class="name">${esc(a.name)}</span><span class="by">${esc(a.author || "")}</span></button>`;
   }).join("") || `<p class="muted" style="padding:0 4px">${BREW ? "Nothing here." : ""}</p>`;
 }
@@ -2018,7 +2025,7 @@ async function brewOpen(id) {
       ${a.where ? `<div class="mono muted">${esc(a.where)}</div>` : ""}</div></div>
     ${info.description ? `<p>${esc(info.description)}</p>` : ""}
     ${info.notes ? `<div class="notes">${esc(info.notes)}</div>` : ""}
-    <p class="muted">${!a.installable ? `This is a ${esc(a.format || "kind of")} download Loadout can't install. ` : ""}Loadout downloads it on the PC, checks it against homebrew.page's signed catalog and puts it in /data/homebrew, where ShadowMountPlus adds it to the home screen. Close the app on the PS5 before updating it.</p>`, btns);
+    <p class="muted">${!a.installable ? `This is a ${esc(a.format || "kind of")} download Loadout can't install. ` : ""}${a.source === "GitHub" ? `Version ${esc(a.version)} comes straight from the app's GitHub releases, newer than homebrew.page lists; Loadout checks it against the release's checksum.` : "Loadout downloads it on the PC and checks it against homebrew.page's signed catalog."} It goes in /data/homebrew, where ShadowMountPlus adds it to the home screen. Your app's own files (like ProsperoEden's games in /data/prosperoeden) are left alone. Close the app on the PS5 before updating it.</p>`, btns);
   if (!r || !r.i) return;
   const label = btns[r.i].label;
   if (label === "Remove") {

@@ -914,7 +914,9 @@ function HbPage({app, prog, onClose, onDone}) {
             {app.installed && !b ? <Button label="Remove" onPress={() => setAsking(true)} /> : null}
             <Button label="Close" onPress={onClose} />
           </View>
-          <Text className="font-inter text-xs text-faint">{`From homebrew.page, checked against its signed catalog. ${app.id}`}</Text>
+          <Text className="font-inter text-xs text-faint">{app.source === 'GitHub'
+            ? `Version ${app.version} from the app's GitHub releases (newer than homebrew.page lists), checked against the release's checksum. ${app.id}`
+            : `From homebrew.page, checked against its signed catalog. ${app.id}`}</Text>
         </View>
       </View>
       {asking ? <Confirm title={`Remove ${app.name}?`} yes="Remove" body="Its folder is deleted from the PS5. The app's own saved data is left alone."

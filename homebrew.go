@@ -27,9 +27,12 @@ import (
 // downloads the app, checks it against the signed hash, unpacks it and puts
 // the app folder in /data/homebrew, where ShadowMountPlus registers it.
 
+// The catalog moved to prosperostore.net (its repository is now
+// darkxex/ps5-homebrew-catalog), signed with the same keys; homebrew.page is
+// tried when it fails.
 var hbBases = []string{
+	"https://prosperostore.net/api/v1/",
 	"https://homebrew.page/api/v1/",
-	"https://blackbearreloaded.github.io/ps5-homebrew-catalog/api/v1/", // the mirror, only if the site fails
 }
 
 // the catalog's two signing keys; either may sign
@@ -44,6 +47,7 @@ const (
 )
 
 type hbApp struct {
+	ID             string  `json:"id"` // the name of its file: the title ID, or TITLEID-owner when two apps share one
 	TitleID        string  `json:"titleid"`
 	Status         string  `json:"status"`
 	Name           string  `json:"name"`
@@ -91,6 +95,7 @@ type hbView struct {
 	Installed   string `json:"installed"` // contentVersion on the PS5, "" when not installed
 	Where       string `json:"where"`     // its folder on the PS5
 	Update      bool   `json:"update"`
+	Source      string `json:"source"` // "GitHub" when its newest release there is ahead of the catalog
 }
 
 type hbManifest struct {
@@ -212,11 +217,20 @@ func hbLoad(refresh bool) (string, hbManifest, []hbApp, error) {
 // hbAppFile is one app's full, checked record.
 func hbAppFile(id string) (hbApp, error) {
 	var a hbApp
-	base, m, _, err := hbLoad(false)
+	base, m, apps, err := hbLoad(false)
 	if err != nil {
 		return a, err
 	}
-	b, err := hbFile(base, m, "apps/"+id+".json")
+	file := id
+	for _, x := range apps {
+		if strings.EqualFold(x.TitleID, id) && x.ID != "" {
+			file = x.ID
+			if strings.EqualFold(x.ID, id) {
+				break // the app that owns the title ID itself
+			}
+		}
+	}
+	b, err := hbFile(base, m, "apps/"+file+".json")
 	if err != nil {
 		return a, err
 	}
@@ -291,10 +305,7 @@ func strOr(p *string) string {
 
 // homebrewList is the catalog with what this PS5 has.
 func (a *App) homebrewList(refresh bool) ([]hbView, error) {
-	_, _, apps, err := hbLoad(refresh)
-	if err != nil {
-		return nil, err
-	}
+	_, _, apps, catErr := hbLoad(refresh)
 	inst := a.hbInstalled()
 	out := make([]hbView, 0, len(apps))
 	for _, x := range apps {
@@ -313,7 +324,39 @@ func (a *App) homebrewList(refresh bool) ([]hbView, error) {
 		}
 		out = append(out, v)
 	}
+	for _, s := range ghSources {
+		at := -1
+		for i := range out {
+			if strings.EqualFold(out[i].ID, s.ID) {
+				at = i
+			}
+		}
+		have := ""
+		if at >= 0 {
+			have = out[at].Content
+		}
+		r, ok := ghNewer(s.ID, have, refresh)
+		if !ok {
+			continue
+		}
+		if at < 0 {
+			out = append(out, hbView{ID: s.ID, Name: s.Name, Status: "available"})
+			at = len(out) - 1
+		}
+		v := &out[at]
+		v.Version, v.Content, v.Size, v.Format, v.Released, v.Installable, v.Source = r.Tag, r.Content, r.Size, "zip", r.Released, true, "GitHub"
+		if i, ok := inst[strings.ToUpper(s.ID)]; ok {
+			v.Installed, v.Where = i[0], i[1]
+			if v.Installed == "" {
+				v.Installed = "installed"
+			}
+			v.Update = newerContent(v.Content, i[0])
+		}
+	}
 	sort.SliceStable(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
+	if len(out) == 0 && catErr != nil {
+		return nil, catErr
+	}
 	return out, nil
 }
 
@@ -322,6 +365,14 @@ func hbFormatOK(f string) bool { return f == "zip" || f == "ffpkg" || f == "ffpf
 // homebrewDetail is one app with its description and release notes.
 func (a *App) homebrewDetail(id string) (map[string]any, error) {
 	x, err := hbAppFile(id)
+	if r, ok := ghNewer(id, strOr(x.ContentVersion), false); ok {
+		name := x.Name
+		if s, _ := ghSourceFor(id); name == "" {
+			name = s.Name
+		}
+		return map[string]any{"id": id, "name": name, "author": x.Author, "description": x.Description, "license": x.License,
+			"version": r.Tag, "notes": r.Notes, "page": r.Page, "icon": strOr(x.Icon), "safety": x.Safety, "source": "GitHub"}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -374,6 +425,17 @@ func (a *App) runHomebrewInstall(j *BuildJob) (string, error) {
 	}
 	setNote("sending", "Reading the catalog", 0)
 	x, err := hbAppFile(id)
+	if r, ok := ghNewer(id, strOr(x.ContentVersion), false); ok {
+		// its own GitHub release is ahead of the catalog: install that one
+		if x.Name == "" {
+			s, _ := ghSourceFor(id)
+			x.Name = s.Name
+		}
+		x.TitleID, x.ArtifactURL, x.SHA256, x.Version, x.Status = id, r.URL, r.SHA, r.Tag, "available"
+		zip := "zip"
+		x.Format = &zip
+		err = nil
+	}
 	if err != nil {
 		return "", err
 	}
