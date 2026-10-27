@@ -909,6 +909,17 @@ func (a *App) installPS5App() (string, error) {
 	a.mu.Unlock()
 	token := a.pairStoreDevice(ps5AppDeviceName)
 
+	// staging folders from earlier installs (the update stage clears itself)
+	if olds, _ := filepath.Glob(filepath.Join(os.TempDir(), "loadout-ps5app-*")); len(olds) > 0 {
+		for _, o := range olds {
+			if filepath.Base(o) == "loadout-ps5app-update" {
+				continue
+			}
+			if fi, err := os.Stat(o); err == nil && time.Since(fi.ModTime()) > 6*time.Hour {
+				os.RemoveAll(o)
+			}
+		}
+	}
 	tmp, err := os.MkdirTemp("", "loadout-ps5app-")
 	if err != nil {
 		return "", err
