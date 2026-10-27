@@ -25,18 +25,19 @@ var idRe = regexp.MustCompile(`([A-Z]{4})[-_]?(\d{5})`)
 
 // Meta is everything we can learn about a game from its sce_sys folder.
 type Meta struct {
-	TitleID   string
-	Name      string
-	Source    string // "param.json" (PS5) or "param.sfo" (PS4)
-	Platform  string // "PS5" / "PS4"
-	ContentID string
-	Version   string
-	SysVer    string // required firmware
-	SDK       string // SDK version the game was built with, e.g. "9.00"
-	AppParams bool   // param.json has app-only settings (kernel, savedata...), so it's a game, not DLC
-	Category  string
-	SysDir    string // path to the sce_sys folder
-	Root      string // the game root (folder holding sce_sys / eboot.bin)
+	TitleID    string
+	Name       string
+	Source     string // "param.json" (PS5) or "param.sfo" (PS4)
+	Platform   string // "PS5" / "PS4"
+	ContentID  string
+	Version    string
+	SysVer     string // required firmware
+	SDK        string // SDK version the game was built with, e.g. "9.00"
+	VersionURI string // Sony's latest-version file for this title (param.json versionFileUri)
+	AppParams  bool   // param.json has app-only settings (kernel, savedata...), so it's a game, not DLC
+	Category   string
+	SysDir     string // path to the sce_sys folder
+	Root       string // the game root (folder holding sce_sys / eboot.bin)
 }
 
 type Game struct {
@@ -99,27 +100,28 @@ func isIgnored(name string, ignored []string) bool {
 
 // LibEntry is one game in the saved library.
 type LibEntry struct {
-	TitleID   string
-	Name      string
-	Platform  string
-	ContentID string
-	Version   string
-	SysVer    string
-	SDK       string
-	Category  string
-	Folder    string // full path, last place we saw it
-	SizeBytes int64
-	Icon      string // cached copy of icon0.png in the app data folder
-	Thumb     string // small version for the list
-	FirstSeen time.Time
-	LastSeen  time.Time
-	Present   bool
-	Image     string     // exFAT image made from it, set when the folder was removed
-	DLC       []DLC      // DLC found in its folder at the last scan
-	Pkg       bool       `json:",omitempty"` // it's a PS4 package file, not a folder
-	Hero      string     `json:",omitempty"` // big background art (from sce_sys/pic0.png)
-	Store     *StoreInfo `json:",omitempty"` // PlayStation Store listing
-	Backport  bool       `json:",omitempty"` // the game folder had a fakelib folder: it has been backported
+	TitleID    string
+	Name       string
+	Platform   string
+	ContentID  string
+	Version    string
+	SysVer     string
+	SDK        string
+	Category   string
+	Folder     string // full path, last place we saw it
+	SizeBytes  int64
+	Icon       string // cached copy of icon0.png in the app data folder
+	Thumb      string // small version for the list
+	FirstSeen  time.Time
+	LastSeen   time.Time
+	Present    bool
+	Image      string     // exFAT image made from it, set when the folder was removed
+	DLC        []DLC      // DLC found in its folder at the last scan
+	Pkg        bool       `json:",omitempty"` // it's a PS4 package file, not a folder
+	Hero       string     `json:",omitempty"` // big background art (from sce_sys/pic0.png)
+	Store      *StoreInfo `json:",omitempty"` // PlayStation Store listing
+	VersionURI string     `json:",omitempty"` // Sony's latest-version file address
+	Backport   bool       `json:",omitempty"` // the game folder had a fakelib folder: it has been backported
 }
 
 var knownIDRe = regexp.MustCompile(`(PPSA|CUSA|PPLH|PLJM|PLJS|PCJS|PCAS|PLAS|ELJM|ECAS)[-_]?(\d{5})`)
@@ -156,6 +158,7 @@ func readParamJSON(p string) (Meta, error) {
 		Kernel              json.RawMessage            `json:"kernel"`
 		Savedata            json.RawMessage            `json:"savedata"`
 		GameIntent          json.RawMessage            `json:"gameIntent"`
+		VersionFileURI      string                     `json:"versionFileUri"`
 	}
 	if err = json.Unmarshal(b, &pj); err != nil {
 		return m, err
@@ -167,6 +170,7 @@ func readParamJSON(p string) (Meta, error) {
 		m.Version = pj.MasterVersion
 	}
 	m.Version = strings.TrimSpace(m.Version)
+	m.VersionURI = strings.TrimSpace(pj.VersionFileURI)
 	if len(pj.ReqSys) > 0 {
 		var s string
 		if json.Unmarshal(pj.ReqSys, &s) == nil {
@@ -971,6 +975,7 @@ func updateLibrary(lib *Library, root string, games []*Game) {
 		set(&e.Version, m.Version)
 		set(&e.SysVer, m.SysVer)
 		set(&e.SDK, m.SDK)
+		set(&e.VersionURI, m.VersionURI)
 		e.DLC = g.DLC
 		if m.Root != "" {
 			e.Backport = isBackported(m.Root, g.Path)

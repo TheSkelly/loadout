@@ -273,6 +273,7 @@ func newApp() *App {
 	go a.watchLoop()
 	go a.spaceLoop()
 	go a.pcDriveLoop()
+	go a.updateLoop()
 	a.cleanTemp()
 	b := make([]byte, 16)
 	rand.Read(b)
@@ -320,6 +321,8 @@ type Item struct {
 	SDK      string `json:"sdk"`
 	ReqFW    string `json:"reqFw"`
 	NeedsFW  bool   `json:"needsFw"`
+	Latest   string `json:"latest"`   // newest version Sony lists, when known
+	Outdated bool   `json:"outdated"` // Latest is newer than Version
 	Backport bool   `json:"backport"`
 	BPState  string `json:"bpState"` // needs, incomplete, ok or ""
 	BPNote   string `json:"bpNote"`
@@ -839,6 +842,8 @@ func (a *App) stateLocked() State {
 		}
 		it.BPState, it.BPNote = backportState(l, known, it.SDK, it.ReqFW, a.cfg.ConsoleFW)
 		it.NeedsFW = it.BPState == "needs" || it.BPState == "incomplete"
+		it.Latest = latestKnown(it.TitleID)
+		it.Outdated = !it.IsDLC && versionNewer(it.Latest, it.Version)
 		it.Backport = it.BPState == "ok"
 		it.ImageStale = imageStale(roots[it.Key], it.Image, a.cfg.ConsoleFW)
 	}
