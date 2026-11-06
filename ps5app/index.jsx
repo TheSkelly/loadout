@@ -1310,7 +1310,7 @@ function Detail({game, status, progress, installs, startDLC, drive, setDrive, on
   const b = busy(prog);
   const st = stateOf(game, prog);
   const by = [game.publisher, game.release].filter(Boolean).join('   ·   ');
-  const chips = [game.platform, game.version && `v${game.version}`, size(game.size), ...(game.genres || []).slice(0, 3), game.rated, game.id].filter(Boolean);
+  const chips = [game.platform, game.version && `v${game.version}`, game.outdated && `Update ${game.latest} available`, size(game.size), ...(game.genres || []).slice(0, 3), game.rated, game.id].filter(Boolean);
   const where = game.onPs5 ? `On your PS5 · ${game.onPs5}` : st ? st.label : '';
   const label = b ? `${WORD[prog.state] || prog.state}…` : game.onPs5 ? 'Download again' : 'Download';
   const shots = game.lib ? Math.min(game.shots || 0, 6) : 0;

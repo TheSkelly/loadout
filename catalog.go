@@ -115,6 +115,8 @@ type storeGame struct {
 	ID         string     `json:"id"`
 	Platform   string     `json:"platform"`
 	Version    string     `json:"version"`
+	Latest     string     `json:"latest"`   // newest version Sony lists, when known
+	Outdated   bool       `json:"outdated"` // Latest is newer than Version
 	Size       int64      `json:"size"`
 	Publisher  string     `json:"publisher"`
 	Release    string     `json:"release"`
@@ -383,7 +385,7 @@ func (a *App) storeGamesLocked() []storeGame {
 		if it.IsDLC || it.IsFile || !(it.Present || it.ExfatOnly) {
 			continue
 		}
-		g := storeGame{Key: it.Key, Name: it.Name, ID: it.TitleID, Platform: it.Platform, Version: it.Version, Size: it.Size,
+		g := storeGame{Key: it.Key, Name: it.Name, ID: it.TitleID, Platform: it.Platform, Version: it.Version, Latest: it.Latest, Outdated: it.Outdated, Size: it.Size,
 			Publisher: it.Publisher, Release: it.Release, Genres: it.Genres, Desc: it.Desc, Rating: it.Rating, Ratings: it.Ratings,
 			Rated: it.Rated, Shots: it.Shots, Ready: it.Image != "", CanGet: it.Image != "" || it.CanBuild, OnPS5: it.OnPS5,
 			FirstSeen: it.FirstSeen, storeProgress: prog[it.Key], PS5Folders: ps5Folders(it.OnPS5List), BPState: it.BPState, BPNote: it.BPNote}
