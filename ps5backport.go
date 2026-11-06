@@ -112,6 +112,18 @@ func ps5Folders(cs []PS5Copy) []string {
 	return out
 }
 
+// deletableCopies are the copies of a game Loadout can delete from the PS5:
+// images and game folders. Installed games go from the PS5's own menu.
+func deletableCopies(cs []PS5Copy) []PS5Copy {
+	out := []PS5Copy{}
+	for _, c := range cs {
+		if c.Kind == "image" || c.Kind == "folder" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // startPS5Backport queues a backport of a game folder on the PS5.
 func (a *App) startPS5Backport(dir string) error {
 	dir = path.Clean("/" + strings.ReplaceAll(dir, "\\", "/"))

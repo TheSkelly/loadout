@@ -1370,6 +1370,7 @@ function Detail({game, status, progress, installs, startDLC, drive, setDrive, on
             ) : null}
             {shown ? <Text className="font-inter text-sm" style={{color: shown.bad ? C.coral : C.sky}}>{shown.text}</Text> : null}
             <BackportSection game={game} progress={progress} say={setNote} ask={setAsking} />
+            <DeleteSection game={game} say={setNote} ask={setAsking} />
           </View>
           <DLCSection game={game} progress={progress} installs={installs} startDLC={d => startDLC(game, d)} say={setNote} ask={setAsking} />
           <SavesSection game={game} progress={progress} say={setNote} ask={setAsking} />
@@ -1428,6 +1429,32 @@ function BackportSection({game, progress, say, ask}) {
             body: 'Your PC changes its programs and settings on this PS5 so it starts on this firmware. The originals are kept on the PC. Close the game first if it is running.',
             onYes: start})} />
       </View>
+    </View>
+  );
+}
+
+// a game's image or folder on this PS5's drives: deleting it here frees the
+// space, and the game leaves the home screen a few minutes after its files go
+// (the PS5's own Delete only removes the tile, and the game comes back)
+function DeleteSection({game, say, ask}) {
+  const copies = game.ps5Copies || [];
+  if (!copies.length) return null;
+  const total = copies.reduce((n, c) => n + (c.size > 0 ? c.size : 0), 0);
+  const where = copies.map(c => `${c.drive}: ${c.path.split('/').pop()}`).join('\n');
+  const run = async () => {
+    try {
+      const r = await api.ps5Delete(copies.map(c => c.path));
+      say({text: (r.data && r.data.msg) || 'Deleting from the PS5.'});
+    } catch (err) {
+      say({text: err.message, bad: true});
+    }
+  };
+  return (
+    <View className="flex-row pt-[4px]">
+      <Button small label={`Delete from drive${total ? ` (${size(total)})` : ''}`}
+        onPress={() => ask({title: `Delete ${game.name} from this PS5?`, yes: 'Delete it',
+          body: `${where}\n\nThe files are deleted from the PS5's drive and the game leaves the home screen a few minutes later. This can't be undone. Your PC copy is not touched.`,
+          onYes: run})} />
     </View>
   );
 }

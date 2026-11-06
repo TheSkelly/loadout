@@ -134,6 +134,7 @@ type storeGame struct {
 	CanGet     bool       `json:"canGet"`     // it can be built (if needed) and sent
 	OnPS5      string     `json:"onPs5"`      // where it already is on the PS5, if anywhere
 	PS5Folders []string   `json:"ps5Folders"` // its game-folder copies on the PS5
+	PS5Copies  []PS5Copy  `json:"ps5Copies"`  // its images and folders on the PS5, which can be deleted
 	BPState    string     `json:"bpState"`    // needs, incomplete, ok or ""
 	BPNote     string     `json:"bpNote"`
 	FirstSeen  string     `json:"firstSeen"`
@@ -388,7 +389,7 @@ func (a *App) storeGamesLocked() []storeGame {
 		g := storeGame{Key: it.Key, Name: it.Name, ID: it.TitleID, Platform: it.Platform, Version: it.Version, Latest: it.Latest, Outdated: it.Outdated, Size: it.Size,
 			Publisher: it.Publisher, Release: it.Release, Genres: it.Genres, Desc: it.Desc, Rating: it.Rating, Ratings: it.Ratings,
 			Rated: it.Rated, Shots: it.Shots, Ready: it.Image != "", CanGet: it.Image != "" || it.CanBuild, OnPS5: it.OnPS5,
-			FirstSeen: it.FirstSeen, storeProgress: prog[it.Key], PS5Folders: ps5Folders(it.OnPS5List), BPState: it.BPState, BPNote: it.BPNote}
+			FirstSeen: it.FirstSeen, storeProgress: prog[it.Key], PS5Folders: ps5Folders(it.OnPS5List), PS5Copies: deletableCopies(it.OnPS5List), BPState: it.BPState, BPNote: it.BPNote}
 		if g.Name == "" {
 			g.Name = it.Current
 		}
@@ -739,6 +740,17 @@ func (a *App) storeRoutes(mux *http.ServeMux, rs *remoteServer, writeJSON func(h
 		var b struct{ Path string }
 		json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&b)
 		return map[string]string{"msg": "Backporting it on the PS5. Close the game first if it's open."}, a.startPS5Backport(b.Path)
+	}))
+	mux.HandleFunc("/s/ps5/delete", post(func(r *http.Request) (any, error) {
+		var b struct{ Paths []string }
+		json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&b)
+		if len(b.Paths) == 0 {
+			return nil, errors.New("Nothing to delete.")
+		}
+		if err := a.startPS5Delete(b.Paths); err != nil {
+			return nil, err
+		}
+		return map[string]string{"msg": "Deleting from the PS5."}, nil
 	}))
 	mux.HandleFunc("/s/homebrew", post(func(r *http.Request) (any, error) {
 		var b struct{ Refresh bool }
