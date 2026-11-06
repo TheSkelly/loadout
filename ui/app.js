@@ -134,7 +134,12 @@ function foreign(s) { const t = (s || "").replace(/[\s\d\p{P}]/gu, ""); return t
 // blurb is the banner text: the plain summary when there is one, otherwise the store text
 function blurb(it, max) { return it.about ? synopsis(it.about, max) : synopsis(it.desc, max); }
 function renderSpot(list) {
+  // the rotating banner is gone: a catalogue reads faster as a plain shelf
   const el = $("#spot");
+  clearTimeout(spotTimer);
+  el.hidden = true;
+  return;
+  /* eslint-disable no-unreachable */
   const picks = list.filter(i => i.hero).sort((a, b) => (b.rating || 0) - (a.rating || 0));
   if (!picks.length || filter !== "all" || $("#q").value.trim()) { el.hidden = true; return; }
   el.hidden = false;
@@ -1943,7 +1948,7 @@ function renderConsole() {
     </section>
     <section class="card">
       <h3>Storage<small>${drives().length} drive${drives().length === 1 ? "" : "s"}</small></h3>
-      ${drives().map(d => `<div><div class="crow"><b>${esc(d.label || d.short)}</b><span class="end">${d.free >= 0 ? size(d.free) + " free" : ""}</span></div>
+      ${drives().map(d => `<div><div class="crow"><b>${esc(d.label || d.short)}</b><span class="end">${d.free >= 0 ? size(d.free) + " free" : "free space unknown"}</span></div>
         ${meter(d.total > 0 && d.free >= 0 ? (d.total - d.free) * 100 / d.total : 0)}<small class="muted">${d.total > 0 ? size(d.total) + " total" : ""}</small></div>`).join("")}
     </section>
     <section class="card">

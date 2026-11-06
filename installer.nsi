@@ -1,5 +1,5 @@
 Unicode true
-!define VERSION "1.61.0"
+!define VERSION "1.62.0"
 !include "MUI2.nsh"
 Name "Loadout ${VERSION}"
 OutFile "Loadout-Setup-${VERSION}.exe"
