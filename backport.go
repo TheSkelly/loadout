@@ -104,6 +104,9 @@ func lookAtImages() {
 	cands = append(cands, folderLooks...)
 	imageLooksMu.Unlock()
 	for _, p := range cands {
+		if strings.EqualFold(filepath.Ext(p), ".exfat") {
+			cacheImageIcon(p) // a cover for images the console doesn't have
+		}
 		size, mod, ok := lookStamp(p)
 		if !ok {
 			continue
