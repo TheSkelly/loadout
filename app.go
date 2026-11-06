@@ -421,8 +421,8 @@ type State struct {
 }
 
 // imageDirsLocked lists every folder that may hold images, current one first:
-// the image folder, the default "exFAT Images" folder, folders used before,
-// and PS5 drives plugged into this PC.
+// the image folder, each games folder and its "exFAT Images" subfolder,
+// folders used before, and PS5 drives plugged into this PC.
 func (a *App) imageDirsLocked() []string {
 	var dirs []string
 	add := func(d string) {
@@ -440,6 +440,7 @@ func (a *App) imageDirsLocked() []string {
 	add(a.outDir())
 	for _, f := range a.gameFoldersLocked() {
 		add(filepath.Join(f, "exFAT Images"))
+		add(f) // images may sit right in an added folder, like H:\PS5\exFAT Images
 	}
 	for _, d := range a.cfg.ImageDirs {
 		add(d)
